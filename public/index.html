@@ -312,9 +312,74 @@
     .algo-data-num{font-size:28px;font-weight:900;line-height:1;}
     .algo-data-lbl{font-size:12px;font-weight:700;color:var(--text);margin:4px 0 2px;}
     .algo-data-sub{font-size:10px;color:var(--mut);}
+  /* ── TAB LOADER ── */
+  #tab-loader{
+    position:fixed;inset:0;z-index:9999;
+    background:rgba(10,12,18,0.82);backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    opacity:0;pointer-events:none;transition:opacity 0.15s;
+  }
+  #tab-loader.show{opacity:1;pointer-events:all;}
+  .loader-scene{width:260px;height:130px;position:relative;overflow:visible;}
+  /* ground line */
+  .loader-scene::after{content:'';position:absolute;bottom:18px;left:0;right:0;height:2px;background:rgba(255,255,255,0.12);border-radius:1px;}
+  /* ball */
+  @keyframes ball-fly{
+    0%  {left:36px;bottom:22px;transform:rotate(0deg);}
+    40% {left:130px;bottom:82px;transform:rotate(200deg);}
+    100%{left:245px;bottom:22px;transform:rotate(400deg);}
+  }
+  @keyframes ball-bounce{
+    0%,100%{transform:scaleY(1);}
+    40%{transform:scaleY(0.92);}
+  }
+  .loader-ball{
+    position:absolute;width:26px;height:26px;
+    background:radial-gradient(circle at 35% 35%,#fff 0%,#ddd 40%,#aaa 100%);
+    border-radius:50%;border:2px solid rgba(0,0,0,0.25);
+    animation:ball-fly 0.72s cubic-bezier(0.25,0.46,0.45,0.94) forwards;
+  }
+  /* player body */
+  @keyframes player-kick{
+    0%  {transform:rotate(0deg);}
+    20% {transform:rotate(-8deg);}
+    40% {transform:rotate(4deg);}
+    100%{transform:rotate(0deg);}
+  }
+  .loader-player{position:absolute;left:0;bottom:18px;animation:player-kick 0.72s ease forwards;}
+  /* SVG player parts via CSS */
+  .loader-player svg{width:52px;height:90px;}
+  /* text */
+  .loader-text{margin-top:18px;font-size:13px;font-weight:700;letter-spacing:1.5px;color:rgba(255,255,255,0.55);text-transform:uppercase;}
+  @keyframes dots{0%,100%{content:''}33%{content:'.'}66%{content:'..'}99%{content:'...'}}
+  .loader-text::after{content:'';animation:dots 1s infinite;}
   </style>
 </head>
 <body>
+<div id="tab-loader">
+  <div class="loader-scene">
+    <div class="loader-player">
+      <svg viewBox="0 0 52 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- head -->
+        <circle cx="26" cy="10" r="8" fill="#f0c080"/>
+        <!-- body -->
+        <rect x="18" y="20" width="16" height="22" rx="4" fill="#2563eb"/>
+        <!-- left arm -->
+        <rect x="6" y="22" width="13" height="6" rx="3" fill="#2563eb" transform="rotate(20 6 22)"/>
+        <!-- right arm (raised for kick) -->
+        <rect x="33" y="18" width="13" height="6" rx="3" fill="#2563eb" transform="rotate(-35 33 18)"/>
+        <!-- left leg -->
+        <rect x="18" y="40" width="7" height="20" rx="3" fill="#1e3a8a"/>
+        <rect x="16" y="58" width="9" height="7" rx="2" fill="#111"/>
+        <!-- right leg (kicking) -->
+        <rect x="27" y="40" width="7" height="16" rx="3" fill="#1e3a8a" transform="rotate(-40 27 40)"/>
+        <rect x="38" y="30" width="9" height="7" rx="2" fill="#111" transform="rotate(-40 38 30)"/>
+      </svg>
+    </div>
+    <div class="loader-ball"></div>
+  </div>
+  <div class="loader-text">Loading</div>
+</div>
 <header>
   <div class="hdr-l">
     <span style="font-size:26px">🏆</span>
@@ -661,16 +726,28 @@ function tr(s,n=10){return s?.length>n?s.slice(0,n)+'…':s||'?';}
 function sn(s){if(!s)return'?';const p=s.split(' ');return p[p.length-1];}
 function fmt(iso){if(!iso)return'?';return new Date(iso).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
 function fmtDate(iso){if(!iso)return'';const d=new Date(iso);return d.toLocaleDateString([],{month:'short',day:'numeric'});}
+function showTabLoader(cb){
+  const el = document.getElementById('tab-loader');
+  el.classList.add('show');
+  // restart ball animation by re-inserting the element
+  const ball = el.querySelector('.loader-ball');
+  const clone = ball.cloneNode(true);
+  ball.replaceWith(clone);
+  setTimeout(()=>{ el.classList.remove('show'); cb(); }, 650);
+}
+
 function setF(f,el){
   filter=f;
   document.querySelectorAll('.fb').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  if(f==='teams'){
-    selectedTeam=null; teamRoster=null;
-    loadTeams();
-  } else {
-    render();
-  }
+  showTabLoader(()=>{
+    if(f==='teams'){
+      selectedTeam=null; teamRoster=null;
+      loadTeams();
+    } else {
+      render();
+    }
+  });
 }
 
 // ─── ALGORITHM TAB ────────────────────────────────────────────────────────────
