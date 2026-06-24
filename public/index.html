@@ -59,6 +59,10 @@
     .ti{overflow:hidden;min-width:0;}
     .tn{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .tm.aw .ti{text-align:right;}
+    .gs-list{margin-top:3px;display:flex;flex-direction:column;gap:1px;}
+    .gs-item{font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .gs-item .gs-min{font-size:9px;color:var(--mut);margin-left:3px;}
+    .tm.aw .gs-list{align-items:flex-end;}
 
     /* CENTER BLOCK */
     .vb{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:100px;}
@@ -682,11 +686,16 @@ function card(g){
   }
 
   const cardId=`card-${(g.home+g.away).replace(/[^a-zA-Z]/g,'')}`;
+  const homeScorers = g.summary?.homeScorers || [];
+  const awayScorers = g.summary?.awayScorers || [];
+  const scorerList = (arr) => arr.length
+    ? `<div class="gs-list">${arr.map(s=>`<div class="gs-item">⚽ ${s.scorer}<span class="gs-min">${s.minute}</span></div>`).join('')}</div>`
+    : '';
   return `<div class="card ${isLive?'lc':''}" id="${cardId}">
     <div class="mr">
-      <div class="tm" onclick="goToTeam('${(g.home||'').replace(/'/g,"\\'")}')"><div class="tf" style="cursor:pointer">${g.homeFlag||'🏳️'}</div><div class="ti" style="cursor:pointer"><div class="tn" style="color:var(--text);transition:color .15s" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--text)'">${g.home||'?'}</div></div></div>
+      <div class="tm" onclick="goToTeam('${(g.home||'').replace(/'/g,"\\'")}')"><div class="tf" style="cursor:pointer">${g.homeFlag||'🏳️'}</div><div class="ti" style="cursor:pointer"><div class="tn" style="color:var(--text);transition:color .15s" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--text)'">${g.home||'?'}</div>${isFin?scorerList(homeScorers):''}</div></div>
       <div class="vb"><div class="vs">vs</div>${center}<div style="font-size:9px;color:var(--mut);margin-top:2px">${fmtDate(g.commence)}</div></div>
-      <div class="tm aw" onclick="goToTeam('${(g.away||'').replace(/'/g,"\\'")}')"><div class="tf" style="cursor:pointer">${g.awayFlag||'🏳️'}</div><div class="ti" style="cursor:pointer"><div class="tn" style="color:var(--text);transition:color .15s" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--text)'">${g.away||'?'}</div></div></div>
+      <div class="tm aw" onclick="goToTeam('${(g.away||'').replace(/'/g,"\\'")}')"><div class="tf" style="cursor:pointer">${g.awayFlag||'🏳️'}</div><div class="ti" style="cursor:pointer"><div class="tn" style="color:var(--text);transition:color .15s" onmouseover="this.style.color='var(--acc)'" onmouseout="this.style.color='var(--text)'">${g.away||'?'}</div>${isFin?scorerList(awayScorers):''}</div></div>
     </div>
     ${allO.length?`<div class="og">${obox(ho,g.home,ho===minO,ho===maxO)}${obox(dr,'Draw',false,false,true)}${obox(ao,g.away,ao===minO,ao===maxO)}</div>`:''}
     ${tot>0?`<div class="pb"><span class="pbl">Win prob.</span><div class="pbt"><div class="pbh" style="width:${hPct}%"></div><div class="pbd" style="width:${dPct}%"></div><div class="pba" style="width:${aPct}%"></div></div><span class="pbv" style="color:var(--grn)">${hPct}%</span></div><div class="pb-labs"><span style="color:var(--grn)">${sn(g.home)} ${hPct}%</span><span style="color:var(--org)">Draw ${dPct}%</span><span style="color:var(--acc)">${sn(g.away)} ${aPct}%</span></div>`:''}

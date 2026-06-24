@@ -102,7 +102,20 @@ async function enrichWithPredictions(games) {
   const now = Date.now();
 
   return Promise.all(games.map(async g => {
-    if (g.status === "finished" || g.status === "live") return g;
+    if (g.status === "live") return g;
+
+    // For finished games, fetch summary just for goalscorers
+    if (g.status === "finished") {
+      if (!g.espnId && !g.id) return g;
+      try {
+        const summary = await getESPNSummary(g.espnId || g.id);
+        if (!summary?.goalscorers?.length) return g;
+        const homeId = g.homeEspnTeamId, awayId = g.awayEspnTeamId;
+        const homeScorers = summary.goalscorers.filter(s => s.teamId === homeId);
+        const awayScorers = summary.goalscorers.filter(s => s.teamId === awayId);
+        return { ...g, summary: { homeScorers, awayScorers } };
+      } catch(_) { return g; }
+    }
 
     const cacheKey = `${normName(g.home)}-${normName(g.away)}`;
     if (predCache[cacheKey] && now - predCache[cacheKey].ts < PRED_TTL)
@@ -144,6 +157,7 @@ async function enrichWithPredictions(games) {
       return { ...g, prediction: pred, summary: summary ? {
         spread: handicap, overUnder: totalLine,
         standings: summary.standings,
+        goalscorers: summary.goalscorers || [],
         context,
       } : undefined };
     } catch(e) {
@@ -286,7 +300,16 @@ async function getESPNSummary(espnId) {
       last5[t.team?.displayName] = { wins, draws, losses, played: t.events?.length || 0 };
     });
 
-    const result = { spread, overUnder, homeMLProb, awayMLProb, standings, last5 };
+    // ── Goal scorers from keyEvents ──
+    const goalscorers = (d.keyEvents || [])
+      .filter(e => e.scoringPlay && e.participants?.length)
+      .map(e => ({
+        scorer: e.participants[0].athlete.displayName,
+        minute: e.clock?.displayValue || '',
+        teamId: e.team?.id || null,
+      }));
+
+    const result = { spread, overUnder, homeMLProb, awayMLProb, standings, last5, goalscorers };
     summaryCache[espnId] = { data: result, ts: now };
     return result;
   } catch(e) {
@@ -340,8 +363,9 @@ function buildGameList(oddsGames, espnMatches) {
     if (m.status!=="FINISHED" && m.status!=="IN_PLAY") continue;
     if (!m.homeTeam || m.homeTeam.includes("Place") || m.homeTeam.includes("Winner")) continue;
     result.push({
-      id: m.id, home:m.homeTeam, away:m.awayTeam,
+      id: m.id, espnId: m.id, home:m.homeTeam, away:m.awayTeam,
       homeFlag:flagFor(m.homeTeam), awayFlag:flagFor(m.awayTeam),
+      homeEspnTeamId: m.homeEspnTeamId, awayEspnTeamId: m.awayEspnTeamId,
       commence:m.utcDate, bookmakerCount:0, odds:{},
       status: m.status==="FINISHED"?"finished":"live",
       homeScore:m.homeScore, awayScore:m.awayScore,
