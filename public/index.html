@@ -36,7 +36,17 @@
     .sb-num.l{color:var(--red);}
     .sb-dash{font-size:clamp(9px,.9vw,12px);color:var(--mut);}
     main{padding:20px 16px;min-width:0;}
-    @media(max-width:800px){.layout{grid-template-columns:1fr;}.sidebar{display:none;}}
+    .sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:199;backdrop-filter:blur(2px);}
+    .sb-overlay.open{display:block;}
+    .sb-close{display:none;position:absolute;top:12px;right:12px;background:var(--sur2);border:1px solid var(--bor);color:var(--dim);border-radius:8px;padding:4px 10px;font-size:13px;cursor:pointer;z-index:1;}
+    .hbg{display:none;background:var(--sur2);border:1px solid var(--bor);color:var(--text);border-radius:8px;padding:6px 10px;font-size:16px;cursor:pointer;line-height:1;}
+    @media(max-width:800px){
+      .layout{grid-template-columns:1fr;}
+      .sidebar{display:none;position:fixed;top:0;left:0;height:100vh;width:82vw;max-width:320px;z-index:200;background:var(--bg);border-right:1px solid var(--bor);transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);padding-top:50px;}
+      .sidebar.open{display:block;transform:translateX(0);}
+      .sb-close{display:block;}
+      .hbg{display:block;}
+    }
     .filters{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;align-items:center;}
     .fb{background:var(--sur);border:1px solid var(--bor);color:var(--dim);border-radius:20px;padding:5px 13px;font-size:11px;cursor:pointer;transition:all .2s;}
     .fb.active{background:var(--acc-g);border-color:var(--acc);color:var(--acc);font-weight:600;}
@@ -386,6 +396,7 @@
 </div>
 <header>
   <div class="hdr-l">
+    <button class="hbg" onclick="openSidebar()" aria-label="Scores">☰</button>
     <span style="font-size:26px">🏆</span>
     <div class="ttl">
       <h1>WC 2026 · AI Prediction Engine</h1>
@@ -408,7 +419,9 @@
   <div class="pt-stats" id="pt-stats"></div>
 </div>
 <div class="layout">
-<aside class="sidebar">
+<div class="sb-overlay" id="sb-overlay" onclick="closeSidebar()"></div>
+<aside class="sidebar" id="sidebar">
+  <button class="sb-close" onclick="closeSidebar()">✕</button>
   <div class="sb-title">🤖 Next 2 Days</div>
   <div id="sb"></div>
 </aside>
@@ -427,6 +440,10 @@
 
 <script>
 let games=[], filter='soon', cdVal=60;
+
+function openSidebar(){document.getElementById('sidebar').classList.add('open');document.getElementById('sb-overlay').classList.add('open');document.body.style.overflow='hidden';}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('open');document.body.style.overflow='';}
+
 let teamsData=[], selectedTeam=null, teamRoster=null, playerPosFilter='all';
 
 // ── Player tooltip ──────────────────────────────────────────────────────────
@@ -1484,6 +1501,7 @@ async function goToTeam(teamName) {
 }
 
 function scrollToCard(id){
+  closeSidebar();
   // If current filter hides this card, switch to 'soon' first
   const el=document.getElementById(id);
   if(!el){
