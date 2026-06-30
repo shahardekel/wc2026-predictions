@@ -538,14 +538,14 @@ function buildGameList(oddsGames, espnMatches) {
 
   for (const m of espnMatches) {
     if (usedESPN.has(m.id)) continue;
-    if (m.status!=="FINISHED" && m.status!=="IN_PLAY") continue;
     if (!m.homeTeam || m.homeTeam.includes("Place") || m.homeTeam.includes("Winner")) continue;
+    const espnStatus = m.status==="FINISHED"?"finished":m.status==="IN_PLAY"?"live":getStatus(m.utcDate);
     result.push({
       id: m.id, espnId: m.id, home:m.homeTeam, away:m.awayTeam,
       homeFlag:flagFor(m.homeTeam), awayFlag:flagFor(m.awayTeam),
       homeEspnTeamId: m.homeEspnTeamId, awayEspnTeamId: m.awayEspnTeamId,
       commence:m.utcDate, bookmakerCount:0, odds:{},
-      status: m.status==="FINISHED"?"finished":"live",
+      status: espnStatus,
       homeScore:m.homeScore, awayScore:m.awayScore,
       result: m.status==="FINISHED"?`${m.homeScore} – ${m.awayScore}`:null,
       liveScore: m.status==="IN_PLAY"?`${m.homeScore??0} – ${m.awayScore??0}`:null,
