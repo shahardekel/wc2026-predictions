@@ -47,7 +47,8 @@ let summaryCache  = {};  // espnId → { data, ts }
 let rosterCache   = {};  // espnTeamId → { data, ts }
 let teamsCache    = { data:null, ts:0 };
 let photoCache    = {};  // playerName → { url, ts }
-let boxscoreCache = {};  // espnId → { homeShotsOnTarget, homeShots, awayShotsOnTarget, awayShots, redCards }
+let boxscoreCache = {};  // espnId → { homeShotsOnTarget, homeShots, homePossession, homeCorners, homeSaves, awayShotsOnTarget, awayShots, awayPossession, awayCorners, awaySaves, redCards }
+let teamStatsCache = {}; // normName → { shotsOnTarget:[], shots:[], possession:[], corners:[], saves:[] }
 const ODDS_TTL    = 90000;
 const SCORES_TTL  = 120000;
 const PRED_TTL    = 600000;
@@ -93,19 +94,42 @@ function injectFromESPN(espnMatches) {
       const espnId = m.id || m.espnId;
       const bc = espnId ? boxscoreCache[espnId] : null;
       let hxg, axg;
-      if (bc && bc.homeShots != null && bc.awayShotsOnTarget != null) {
-        // Shots-based xG: shots on target × 0.33 + off-target shots × 0.05
-        const homeOffTarget = Math.max(0, (bc.homeShots || 0) - (bc.homeShotsOnTarget || 0));
-        const awayOffTarget = Math.max(0, (bc.awayShots || 0) - (bc.awayShotsOnTarget || 0));
-        hxg = +((bc.homeShotsOnTarget || 0) * 0.33 + homeOffTarget * 0.05).toFixed(2);
-        axg = +((bc.awayShotsOnTarget || 0) * 0.33 + awayOffTarget * 0.05).toFixed(2);
+      if (bc && bc.homeShots != null) {
+        const homeOff = Math.max(0, (bc.homeShots||0) - (bc.homeShotsOnTarget||0));
+        const awayOff = Math.max(0, (bc.awayShots||0) - (bc.awayShotsOnTarget||0));
+        const homePoss = bc.homePossession != null ? bc.homePossession : 0.5;
+        const awayPoss = bc.awayPossession != null ? bc.awayPossession : 0.5;
+        const hCorners = bc.homeCorners || 0;
+        const aCorners = bc.awayCorners || 0;
+        // Combined xG: shots (primary) + corners (set pieces) + possession bonus
+        hxg = +Math.max(0.10, (bc.homeShotsOnTarget||0)*0.30 + homeOff*0.04 + hCorners*0.04 + (homePoss-0.5)*0.5).toFixed(2);
+        axg = +Math.max(0.10, (bc.awayShotsOnTarget||0)*0.30 + awayOff*0.04 + aCorners*0.04 + (awayPoss-0.5)*0.5).toFixed(2);
       } else {
         // Fallback: goals proxy
         hxg = +(m.homeScore * 0.85 + 0.15).toFixed(2);
         axg = +(m.awayScore * 0.85 + 0.15).toFixed(2);
       }
-      return { home: m.homeTeam, away: m.awayTeam, hg: m.homeScore, ag: m.awayScore, hxg, axg };
+      return { home: m.homeTeam, away: m.awayTeam, hg: m.homeScore, ag: m.awayScore, hxg, axg, xgSource: bc ? 'shots' : 'proxy' };
     });
+
+  // Rebuild teamStatsCache from boxscoreCache + espnMatches
+  const idToGame = {};
+  espnMatches.filter(m => m.status === 'FINISHED').forEach(m => { idToGame[m.id] = m; });
+  teamStatsCache = {};
+  for (const [espnId, bc] of Object.entries(boxscoreCache)) {
+    const gm = idToGame[espnId];
+    if (!gm) continue;
+    const addStats = (nn, sot, shots, poss, corners, saves) => {
+      if (!teamStatsCache[nn]) teamStatsCache[nn] = { shotsOnTarget:[], shots:[], possession:[], corners:[], saves:[] };
+      if (sot != null) teamStatsCache[nn].shotsOnTarget.push(sot);
+      if (shots != null) teamStatsCache[nn].shots.push(shots);
+      if (poss != null) teamStatsCache[nn].possession.push(poss);
+      if (corners != null) teamStatsCache[nn].corners.push(corners);
+      if (saves != null) teamStatsCache[nn].saves.push(saves);
+    };
+    addStats(normName(gm.homeTeam), bc.homeShotsOnTarget, bc.homeShots, bc.homePossession, bc.homeCorners, bc.homeSaves);
+    addStats(normName(gm.awayTeam), bc.awayShotsOnTarget, bc.awayShots, bc.awayPossession, bc.awayCorners, bc.awaySaves);
+  }
 
   injectLiveResults(liveResults);
   lastInjectionTs = now;
@@ -186,8 +210,14 @@ async function enrichWithPredictions(games) {
           boxscoreCache[espnId] = {
             homeShotsOnTarget: summary.homeShotsOnTarget,
             homeShots: summary.homeShots,
+            homePossession: summary.homePossession,
+            homeCorners: summary.homeCorners,
+            homeSaves: summary.homeSaves,
             awayShotsOnTarget: summary.awayShotsOnTarget,
             awayShots: summary.awayShots,
+            awayPossession: summary.awayPossession,
+            awayCorners: summary.awayCorners,
+            awaySaves: summary.awaySaves,
             redCards: summary.redCards || [],
             homeTeamId: g.homeEspnTeamId,
             awayTeamId: g.awayEspnTeamId,
@@ -419,8 +449,11 @@ async function getESPNSummary(espnId) {
         minute: e.clock?.displayValue || '',
       }));
 
-    // ── Shots stats from boxscore ──
+    // ── Shots, possession, corners, saves stats from boxscore ──
     let homeShotsOnTarget = null, homeShots = null, awayShotsOnTarget = null, awayShots = null;
+    let homePossession = null, awayPossession = null;
+    let homeCorners = null, awayCorners = null;
+    let homeSaves = null, awaySaves = null;
     if (d.boxscore?.teams?.length) {
       for (const t of d.boxscore.teams) {
         const getStat = name => {
@@ -429,13 +462,23 @@ async function getESPNSummary(espnId) {
         };
         const sot = getStat('shotsOnTarget') ?? getStat('SOT');
         const tot = getStat('totalShots') ?? getStat('shots');
-        if (t.homeAway === 'home') { homeShotsOnTarget = sot; homeShots = tot; }
-        else { awayShotsOnTarget = sot; awayShots = tot; }
+        const rawPoss = getStat('possessionPct');
+        const poss = rawPoss != null ? (rawPoss > 1 ? rawPoss / 100 : rawPoss) : null;
+        const corners = getStat('wonCorners');
+        const saves = getStat('saves');
+        if (t.homeAway === 'home') {
+          homeShotsOnTarget = sot; homeShots = tot;
+          homePossession = poss; homeCorners = corners; homeSaves = saves;
+        } else {
+          awayShotsOnTarget = sot; awayShots = tot;
+          awayPossession = poss; awayCorners = corners; awaySaves = saves;
+        }
       }
     }
 
     const result = { spread, overUnder, homeMLProb, awayMLProb, standings, last5, goalscorers, redCards,
-      homeShotsOnTarget, homeShots, awayShotsOnTarget, awayShots };
+      homeShotsOnTarget, homeShots, homePossession, homeCorners, homeSaves,
+      awayShotsOnTarget, awayShots, awayPossession, awayCorners, awaySaves };
     summaryCache[espnId] = { data: result, ts: now };
     return result;
   } catch(e) {
@@ -634,10 +677,22 @@ app.get("/api/algo-data", (req, res) => {
     .map(([nn, elo]) => ({ name: nameByNorm[nn] || nn, nn, elo: Math.round(elo) }))
     .sort((a, b) => b.elo - a.elo);
 
+  const avg = arr => arr.length ? +(arr.reduce((s,v)=>s+v,0)/arr.length).toFixed(2) : null;
+  const teamStatsOut = Object.entries(teamStatsCache).map(([nn, s]) => ({
+    nn,
+    games: s.shotsOnTarget.length,
+    avgShotsOnTarget: avg(s.shotsOnTarget),
+    avgShots: avg(s.shots),
+    avgPossession: avg(s.possession),
+    avgCorners: avg(s.corners),
+    avgSaves: avg(s.saves),
+  })).filter(t => t.games > 0).sort((a,b) => (b.avgShotsOnTarget||0) - (a.avgShotsOnTarget||0));
+
   res.json({
     leagueAvg: +LEAGUE_AVG_XG_live().toFixed(3),
     teamStrengths,
     eloRatings,
+    teamStats: teamStatsOut,
     wc2026Count: WC_RESULTS.length,
     wc2022Count: WC2022_RESULTS.length,
     dcRho: -0.028,

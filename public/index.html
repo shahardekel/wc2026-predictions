@@ -833,8 +833,8 @@ function buildAlgoPage(d){
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
         <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
-          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Live xG from shots</div>
-          <div style="font-size:11px;color:var(--dim);line-height:1.5">Team strength is estimated from shots on target (×0.33) + off-target shots (×0.05) — a more accurate xG signal than goals alone. Falls back to goals proxy until ESPN boxscore is cached.</div>
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Live xG from shots + possession + corners</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">xG = SoT×0.30 + off-target×0.04 + corners×0.04 + (possession−50%)×0.005. Falls back to goals proxy until ESPN boxscore is cached.</div>
         </div>
         <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🟥 Red card suspensions</div>
@@ -899,6 +899,65 @@ function buildAlgoPage(d){
       <p class="algo-sub">Each bar shows attack (goals scored vs avg defense) and defense (goals conceded vs avg attack). Values above <strong>${d.leagueAvg}</strong> are above the WC average. Updated with exponential-decay xG weighting across WC 2026 and 2022 matches.</p>
       <div id="strength-chart"></div>
     </div>
+
+    <!-- ── LIVE MATCH STATS ── -->
+    ${d.teamStats?.length > 0 ? `<div class="algo-section">
+      <h2 class="algo-h2">Live match statistics</h2>
+      <p class="algo-sub">Per-team averages across all WC 2026 games with ESPN boxscore data. These stats feed directly into the multi-factor xG formula.</p>
+      <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:11px 14px;margin-bottom:14px;font-family:monospace;font-size:12px;color:var(--dim)">
+        xG formula: <span style="color:var(--text)">SoT×0.30 + off-target×0.04 + corners×0.04 + (possession−50%)×0.005</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:520px">
+          <thead>
+            <tr style="color:var(--mut);border-bottom:1px solid var(--bor)">
+              <th style="text-align:left;padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Team</th>
+              <th style="text-align:left;padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Avg SoT</th>
+              <th style="text-align:left;padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Avg Shots</th>
+              <th style="text-align:left;padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Possession %</th>
+              <th style="text-align:left;padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Corners</th>
+              <th style="text-align:left;padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Saves</th>
+              <th style="text-align:center;padding:6px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">G</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${d.teamStats.map(t => {
+              const name = t.nn.replace(/\b\w/g,c=>c.toUpperCase());
+              const sotW  = t.avgShotsOnTarget != null ? Math.round(t.avgShotsOnTarget / 8 * 100) : 0;
+              const shoW  = t.avgShots         != null ? Math.round(t.avgShots / 20 * 100) : 0;
+              const posW  = t.avgPossession    != null ? Math.round(t.avgPossession / 0.70 * 100) : 0;
+              const corW  = t.avgCorners       != null ? Math.round(t.avgCorners / 8 * 100) : 0;
+              const savW  = t.avgSaves         != null ? Math.round(t.avgSaves / 6 * 100) : 0;
+              const bar = (pct, color) => `<div style="width:100%;height:6px;background:var(--bor);border-radius:3px;overflow:hidden;margin-top:3px"><div style="width:${Math.min(100,pct)}%;height:100%;background:${color};border-radius:3px"></div></div>`;
+              return `<tr style="border-bottom:1px solid rgba(37,48,71,.4)">
+                <td style="padding:7px 8px;font-weight:600;color:var(--text);white-space:nowrap">${name}</td>
+                <td style="padding:7px 8px;min-width:90px">
+                  <span style="color:var(--grn);font-weight:700">${t.avgShotsOnTarget??'—'}</span>
+                  ${t.avgShotsOnTarget!=null?bar(sotW,'var(--grn)'):''}
+                </td>
+                <td style="padding:7px 8px;min-width:90px">
+                  <span style="color:var(--org);font-weight:700">${t.avgShots??'—'}</span>
+                  ${t.avgShots!=null?bar(shoW,'var(--org)'):''}
+                </td>
+                <td style="padding:7px 8px;min-width:90px">
+                  <span style="color:var(--acc);font-weight:700">${t.avgPossession!=null?Math.round(t.avgPossession*100)+'%':'—'}</span>
+                  ${t.avgPossession!=null?bar(posW,'var(--acc)'):''}
+                </td>
+                <td style="padding:7px 8px;min-width:90px">
+                  <span style="color:var(--pur);font-weight:700">${t.avgCorners??'—'}</span>
+                  ${t.avgCorners!=null?bar(corW,'var(--pur)'):''}
+                </td>
+                <td style="padding:7px 8px;min-width:90px">
+                  <span style="color:var(--gld);font-weight:700">${t.avgSaves??'—'}</span>
+                  ${t.avgSaves!=null?bar(savW,'var(--gld)'):''}
+                </td>
+                <td style="padding:7px 8px;text-align:center;color:var(--mut)">${t.games}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ''}
 
     <!-- ── ELO RANKINGS ── -->
     <div class="algo-section">
