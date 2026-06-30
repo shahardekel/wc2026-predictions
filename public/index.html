@@ -530,10 +530,10 @@ async function load(manual=false){
     if(!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const j=await r.json();
     console.log('[load] source:', j.source, '| games:', j.games?.length, '| quota:', j.quota);
-    if(j.source==='error') throw new Error('Server returned source:error — check server logs');
     games=j.games||[];
-    dot.className=j.source==='live'?'dot ok':'dot';
-    st.textContent=j.source==='live'?'Live data':'Demo (no API key)';
+    const src=j.source||'';
+    dot.className=src==='live'?'dot ok':'dot';
+    st.textContent=src==='live'?'Live data':src==='error'?'ESPN data (no odds)':'ESPN data';
     if(j.quota){const q=document.getElementById('quota');q.style.display='block';q.textContent=`API: ${j.quota.used} used · ${j.quota.remaining} left`;}
     render(); renderSidebar(); cdVal=60; document.getElementById('cd').textContent=60;
   }catch(e){

@@ -143,6 +143,7 @@ app.get("/api/odds", async (req, res) => {
       skipOdds ? Promise.resolve(oddsCache.data || { games:[], source:'cached', quota:null }) : getOdds(),
       getESPN(),
     ]);
+    console.log('DEBUG oddsResult.source:', oddsResult.source, '| games:', oddsResult.games?.length, '| skipOdds:', skipOdds);
     const games = buildGameList(oddsResult.games, espnMatches);
 
     // Enrich first — populates boxscoreCache with real shots data for finished games
@@ -151,15 +152,17 @@ app.get("/api/odds", async (req, res) => {
     // Inject after enrichment so shots-based xG is used instead of goals proxy
     injectFromESPN(espnMatches);
 
+    const finalSource = skipOdds ? 'cached' : (oddsResult.source || 'mock');
+    console.log('RESPONSE source:', finalSource, '| skipOdds:', skipOdds, '| oddsResult.source:', oddsResult.source);
     res.json({
-      source: skipOdds ? 'cached' : oddsResult.source,
+      source: finalSource,
       games: enriched,
       quota: oddsResult.quota,
       scoresSource: espnMatches.length ? "espn" : "none",
     });
   } catch(err) {
-    console.error("Error:", err.message);
-    res.json({ source:"error", games:[] });
+    console.error("API Error:", err.message, err.stack);
+    res.json({ source:"error", games:[], error: err.message });
   }
 });
 
