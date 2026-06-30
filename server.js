@@ -49,7 +49,7 @@ let teamsCache    = { data:null, ts:0 };
 let photoCache    = {};  // playerName → { url, ts }
 let boxscoreCache = {};  // espnId → { homeShotsOnTarget, homeShots, homePossession, homeCorners, homeSaves, awayShotsOnTarget, awayShots, awayPossession, awayCorners, awaySaves, redCards }
 let teamStatsCache = {}; // normName → { shotsOnTarget:[], shots:[], possession:[], corners:[], saves:[] }
-const ODDS_TTL    = 90000;
+const ODDS_TTL    = 43200000; // 12 hours — conserve API quota
 const SCORES_TTL  = 120000;
 const PRED_TTL    = 600000;
 const SUMMARY_TTL = 600000;
@@ -138,7 +138,11 @@ function injectFromESPN(espnMatches) {
 // ─── ENDPOINTS ───────────────────────────────────────────────────────────────
 app.get("/api/odds", async (req, res) => {
   try {
-    const [oddsResult, espnMatches] = await Promise.all([getOdds(), getESPN()]);
+    const skipOdds = req.query.skipOdds === 'true';
+    const [oddsResult, espnMatches] = await Promise.all([
+      skipOdds ? Promise.resolve(oddsCache.data || { games:[], source:'cached', quota:null }) : getOdds(),
+      getESPN(),
+    ]);
     const games = buildGameList(oddsResult.games, espnMatches);
 
     // Enrich first — populates boxscoreCache with real shots data for finished games
@@ -148,7 +152,7 @@ app.get("/api/odds", async (req, res) => {
     injectFromESPN(espnMatches);
 
     res.json({
-      source: oddsResult.source,
+      source: skipOdds ? 'cached' : oddsResult.source,
       games: enriched,
       quota: oddsResult.quota,
       scoresSource: espnMatches.length ? "espn" : "none",

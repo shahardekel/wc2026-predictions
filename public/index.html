@@ -518,12 +518,15 @@ document.addEventListener('mouseout', e => {
 load();
 setInterval(()=>{cdVal--;document.getElementById('cd').textContent=cdVal;if(cdVal<=0)load();},1000);
 
-async function load(m=false){
+async function load(manual=false){
+  const m=manual;
   const btn=document.getElementById('rbtn'); btn.classList.add('spin');
   const dot=document.getElementById('dot'), st=document.getElementById('stxt');
   try{
-    console.log('[load] fetching /api/odds…');
-    const r=await fetch('/api/odds');
+    // Manual refresh fetches fresh odds (uses API quota). Auto-refresh skips odds (free).
+    const url = m ? '/api/odds' : '/api/odds?skipOdds=true';
+    console.log('[load]', m ? 'manual — fetching fresh odds' : 'auto — skipping odds API');
+    const r=await fetch(url);
     if(!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const j=await r.json();
     console.log('[load] source:', j.source, '| games:', j.games?.length, '| quota:', j.quota);
