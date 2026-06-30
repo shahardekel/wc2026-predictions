@@ -813,22 +813,36 @@ function buildAlgoPage(d){
     <!-- ── OVERVIEW ── -->
     <div class="algo-section">
       <h2 class="algo-h2">How the prediction engine works</h2>
-      <p class="algo-sub">A three-component probabilistic model trained on ${d.wc2026Count} WC 2026 matches and ${d.wc2022Count} WC 2022 historical matches. It produces a full score probability distribution, not just a single number.</p>
+      <p class="algo-sub">A three-component probabilistic model trained on <strong>${d.wc2026Count}</strong> WC 2026 matches (live-updated) and <strong>${d.wc2022Count}</strong> WC 2022 historical matches. It produces a full score probability distribution, not just a single number.</p>
       <div class="algo-cards">
         <div class="algo-card" style="border-color:var(--grn)">
           <div class="algo-card-pct" style="color:var(--grn)">55%</div>
           <div class="algo-card-name">Dixon-Coles Poisson</div>
-          <div class="algo-card-desc">Builds a full 10×10 score probability matrix using team attack/defense parameters. Includes a low-score correlation correction for 0-0, 1-0, 0-1, 1-1 scorelines.</div>
+          <div class="algo-card-desc">Builds a full 10×10 score probability matrix using Bayesian team attack/defense parameters. Includes a low-score correlation correction (ρ=−0.028) for 0-0, 1-0, 0-1, 1-1.</div>
         </div>
         <div class="algo-card" style="border-color:var(--org)">
           <div class="algo-card-pct" style="color:var(--org)">40%</div>
           <div class="algo-card-name">Market Odds</div>
-          <div class="algo-card-desc">Bookmaker consensus probabilities (de-vigged) from ${d.wc2026Count > 0 ? '40+' : 'multiple'} bookmakers. The "wisdom of crowds" — markets aggregate massive information efficiently.</div>
+          <div class="algo-card-desc">Bookmaker consensus probabilities (de-vigged) from 40+ bookmakers. The "wisdom of crowds" — markets aggregate massive information efficiently.</div>
         </div>
         <div class="algo-card" style="border-color:var(--pur)">
           <div class="algo-card-pct" style="color:var(--pur)">5%</div>
           <div class="algo-card-name">Bayesian Elo</div>
           <div class="algo-card-desc">Elo ratings initialised from FIFA rankings (K=32), updated live after each WC 2026 result. Used as a calibration cross-check.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+        <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Live xG from shots</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">Team strength is estimated from shots on target (×0.33) + off-target shots (×0.05) — a more accurate xG signal than goals alone. Falls back to goals proxy until ESPN boxscore is cached.</div>
+        </div>
+        <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🟥 Red card suspensions</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">If a team received a red card in their most recent game, their attacking λ is reduced by 6% per suspended player. Shown as a warning on the heatmap when applicable.</div>
+        </div>
+        <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🔄 Auto-updating model</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">Every 2 minutes, finished games are re-injected into the Bayesian model. Elo ratings and team attack/defense parameters update automatically as results come in.</div>
         </div>
       </div>
     </div>

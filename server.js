@@ -115,11 +115,13 @@ function injectFromESPN(espnMatches) {
 app.get("/api/odds", async (req, res) => {
   try {
     const [oddsResult, espnMatches] = await Promise.all([getOdds(), getESPN()]);
-    injectFromESPN(espnMatches);
     const games = buildGameList(oddsResult.games, espnMatches);
 
-    // Enrich upcoming games with algorithm predictions
+    // Enrich first — populates boxscoreCache with real shots data for finished games
     const enriched = await enrichWithPredictions(games);
+
+    // Inject after enrichment so shots-based xG is used instead of goals proxy
+    injectFromESPN(espnMatches);
 
     res.json({
       source: oddsResult.source,
