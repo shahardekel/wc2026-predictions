@@ -540,6 +540,10 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
     else if (usedHandicap > 0) { lambdaA += spread / 2; lambdaH -= spread / 2; }
   }
 
+  // Suspension penalty (~6% lambda reduction per suspended player)
+  if (context.homeSuspensions) lambdaH *= Math.pow(0.94, context.homeSuspensions);
+  if (context.awaySuspensions) lambdaA *= Math.pow(0.94, context.awaySuspensions);
+
   // Tournament pressure (desperation attack boost)
   if (context.homeMustWin) lambdaH *= 1.06;
   if (context.awayMustWin) lambdaA *= 1.06;
@@ -701,6 +705,10 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
       } : null,
       weather:  { condition: weather.condition, temp: weather.temp, weight: 0 },
       social:   { home: SOCIAL_BUZZ[home]||30, away: SOCIAL_BUZZ[away]||30, weight: 0 },
+      suspensions: (context.homeSuspensions || context.awaySuspensions) ? {
+        home: context.homeSuspensions || 0,
+        away: context.awaySuspensions || 0,
+      } : null,
     },
     homeForm, awayForm,
   };

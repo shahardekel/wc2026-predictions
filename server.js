@@ -40,13 +40,14 @@ const VENUES = {
   "Jordan-Argentina":"Dallas",
 };
 
-let oddsCache    = { data:null, ts:0 };
-let scoresCache  = { data:null, ts:0 };
-let predCache    = {};  // team pair → prediction
-let summaryCache = {};  // espnId → { data, ts }
-let rosterCache  = {};  // espnTeamId → { data, ts }
-let teamsCache   = { data:null, ts:0 };
-let photoCache   = {};  // playerName → { url, ts }
+let oddsCache     = { data:null, ts:0 };
+let scoresCache   = { data:null, ts:0 };
+let predCache     = {};  // team pair → prediction
+let summaryCache  = {};  // espnId → { data, ts }
+let rosterCache   = {};  // espnTeamId → { data, ts }
+let teamsCache    = { data:null, ts:0 };
+let photoCache    = {};  // playerName → { url, ts }
+let boxscoreCache = {};  // espnId → { homeShotsOnTarget, homeShots, awayShotsOnTarget, awayShots, redCards }
 const ODDS_TTL    = 90000;
 const SCORES_TTL  = 120000;
 const PRED_TTL    = 600000;
@@ -88,14 +89,23 @@ function injectFromESPN(espnMatches) {
       m.homeScore != null && m.awayScore != null &&
       !m.homeTeam.includes("Place") && !m.homeTeam.includes("Winner")
     )
-    .map(m => ({
-      home: m.homeTeam,
-      away: m.awayTeam,
-      hg:   m.homeScore,
-      ag:   m.awayScore,
-      hxg:  +(m.homeScore * 0.85 + 0.15).toFixed(2),
-      axg:  +(m.awayScore * 0.85 + 0.15).toFixed(2),
-    }));
+    .map(m => {
+      const espnId = m.id || m.espnId;
+      const bc = espnId ? boxscoreCache[espnId] : null;
+      let hxg, axg;
+      if (bc && bc.homeShots != null && bc.awayShotsOnTarget != null) {
+        // Shots-based xG: shots on target × 0.33 + off-target shots × 0.05
+        const homeOffTarget = Math.max(0, (bc.homeShots || 0) - (bc.homeShotsOnTarget || 0));
+        const awayOffTarget = Math.max(0, (bc.awayShots || 0) - (bc.awayShotsOnTarget || 0));
+        hxg = +((bc.homeShotsOnTarget || 0) * 0.33 + homeOffTarget * 0.05).toFixed(2);
+        axg = +((bc.awayShotsOnTarget || 0) * 0.33 + awayOffTarget * 0.05).toFixed(2);
+      } else {
+        // Fallback: goals proxy
+        hxg = +(m.homeScore * 0.85 + 0.15).toFixed(2);
+        axg = +(m.awayScore * 0.85 + 0.15).toFixed(2);
+      }
+      return { home: m.homeTeam, away: m.awayTeam, hg: m.homeScore, ag: m.awayScore, hxg, axg };
+    });
 
   injectLiveResults(liveResults);
   lastInjectionTs = now;
@@ -135,6 +145,26 @@ app.get("/api/predict/:home/:away", async (req, res) => {
   }
 });
 
+// ─── SUSPENSION HELPER ────────────────────────────────────────────────────────
+// Returns the number of suspended players (red cards in most recent finished game) for a team.
+function getTeamSuspensions(teamName, allGames) {
+  const finished = (allGames || []).filter(g =>
+    g.status === "finished" &&
+    (teamNamesMatch(g.home, teamName) || teamNamesMatch(g.away, teamName))
+  );
+  if (!finished.length) return 0;
+  // Most recent finished game (sorted newest-first by commence)
+  finished.sort((a, b) => new Date(b.commence) - new Date(a.commence));
+  const recent = finished[0];
+  const espnId = recent.espnId || recent.id;
+  if (!espnId || !boxscoreCache[espnId]) return 0;
+  const bc = boxscoreCache[espnId];
+  const isHome = teamNamesMatch(recent.home, teamName);
+  const teamId = isHome ? bc.homeTeamId : bc.awayTeamId;
+  if (!teamId || !bc.redCards?.length) return 0;
+  return bc.redCards.filter(rc => rc.teamId === teamId).length;
+}
+
 // ─── PREDICTIONS ENRICHMENT ───────────────────────────────────────────────
 async function enrichWithPredictions(games) {
   const now = Date.now();
@@ -142,16 +172,32 @@ async function enrichWithPredictions(games) {
   return Promise.all(games.map(async g => {
     if (g.status === "live") return g;
 
-    // For finished games, fetch summary just for goalscorers
+    // For finished games, fetch summary for goalscorers + store shots/red cards in boxscoreCache
     if (g.status === "finished") {
       if (!g.espnId && !g.id) return g;
       try {
-        const summary = await getESPNSummary(g.espnId || g.id);
-        if (!summary?.goalscorers?.length) return g;
+        const espnId = g.espnId || g.id;
+        const summary = await getESPNSummary(espnId);
+        if (!summary) return g;
+        // Populate boxscoreCache with shots + red card data for this finished game
+        if (espnId && !boxscoreCache[espnId]) {
+          boxscoreCache[espnId] = {
+            homeShotsOnTarget: summary.homeShotsOnTarget,
+            homeShots: summary.homeShots,
+            awayShotsOnTarget: summary.awayShotsOnTarget,
+            awayShots: summary.awayShots,
+            redCards: summary.redCards || [],
+            homeTeamId: g.homeEspnTeamId,
+            awayTeamId: g.awayEspnTeamId,
+          };
+        }
+        if (!summary.goalscorers?.length && !summary.redCards?.length) return g;
         const homeId = g.homeEspnTeamId, awayId = g.awayEspnTeamId;
-        const homeScorers = summary.goalscorers.filter(s => s.teamId === homeId);
-        const awayScorers = summary.goalscorers.filter(s => s.teamId === awayId);
-        return { ...g, summary: { homeScorers, awayScorers } };
+        const homeScorers = (summary.goalscorers || []).filter(s => s.teamId === homeId);
+        const awayScorers = (summary.goalscorers || []).filter(s => s.teamId === awayId);
+        const homeRedCards = (summary.redCards || []).filter(s => s.teamId === homeId);
+        const awayRedCards = (summary.redCards || []).filter(s => s.teamId === awayId);
+        return { ...g, summary: { homeScorers, awayScorers, homeRedCards, awayRedCards } };
       } catch(_) { return g; }
     }
 
@@ -169,6 +215,13 @@ async function enrichWithPredictions(games) {
         g.awayEspnTeamId ? getTeamRoster(g.awayEspnTeamId) : Promise.resolve(null),
       ]);
       const context = deriveContext(summary, g.home, g.away);
+
+      // Add suspension context from most recent finished game for each team
+      const homeSusp = getTeamSuspensions(g.home, games);
+      const awaySusp = getTeamSuspensions(g.away, games);
+      if (homeSusp > 0) context.homeSuspensions = homeSusp;
+      if (awaySusp > 0) context.awaySuspensions = awaySusp;
+
       const handicap  = summary?.spread    ?? g.handicap  ?? null;
       const totalLine = summary?.overUnder  ?? g.totalLine ?? null;
 
@@ -192,11 +245,19 @@ async function enrichWithPredictions(games) {
 
       const pred = await predict(g.home, g.away, venue, context, g.odds || {}, handicap, totalLine, playerStats);
       predCache[cacheKey] = { data: pred, ts: now };
+      // Determine xG source for this game
+      const espnId = g.espnId || g.id;
+      const bc = espnId ? boxscoreCache[espnId] : null;
+      const xgSource = (bc && bc.homeShots != null && bc.awayShotsOnTarget != null) ? 'shots' : 'proxy';
+
       return { ...g, prediction: pred, summary: summary ? {
         spread: handicap, overUnder: totalLine,
         standings: summary.standings,
         goalscorers: summary.goalscorers || [],
         context,
+        homeSuspensions: homeSusp,
+        awaySuspensions: awaySusp,
+        xgSource,
       } : undefined };
     } catch(e) {
       console.error(`Prediction error for ${g.home} vs ${g.away}:`, e.message);
@@ -347,7 +408,32 @@ async function getESPNSummary(espnId) {
         teamId: e.team?.id || null,
       }));
 
-    const result = { spread, overUnder, homeMLProb, awayMLProb, standings, last5, goalscorers };
+    // ── Red cards from keyEvents ──
+    const redCards = (d.keyEvents || [])
+      .filter(e => e.type?.type === 'red-card' && e.participants?.length)
+      .map(e => ({
+        player: e.participants[0].athlete.displayName,
+        teamId: e.team?.id || null,
+        minute: e.clock?.displayValue || '',
+      }));
+
+    // ── Shots stats from boxscore ──
+    let homeShotsOnTarget = null, homeShots = null, awayShotsOnTarget = null, awayShots = null;
+    if (d.boxscore?.teams?.length) {
+      for (const t of d.boxscore.teams) {
+        const getStat = name => {
+          const s = (t.statistics || []).find(s => s.name === name || s.abbreviation === name);
+          return s ? parseFloat(s.displayValue ?? s.value) : null;
+        };
+        const sot = getStat('shotsOnTarget') ?? getStat('SOT');
+        const tot = getStat('totalShots') ?? getStat('shots');
+        if (t.homeAway === 'home') { homeShotsOnTarget = sot; homeShots = tot; }
+        else { awayShotsOnTarget = sot; awayShots = tot; }
+      }
+    }
+
+    const result = { spread, overUnder, homeMLProb, awayMLProb, standings, last5, goalscorers, redCards,
+      homeShotsOnTarget, homeShots, awayShotsOnTarget, awayShots };
     summaryCache[espnId] = { data: result, ts: now };
     return result;
   } catch(e) {

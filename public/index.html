@@ -644,8 +644,10 @@ function card(g){
       </div>
       <span class="fw">prior</span>
     </div>`;
+    const _suspH = f.suspensions?.home||0, _suspA = f.suspensions?.away||0;
+    const _xgSrc = g.summary?.xgSource==='shots'?'shots':'proxy';
     factorHTML=`<div class="factors">
-      <div class="factors-title" onclick="goToAlgo('${g.home.replace(/'/g,"\\'")}','${g.away.replace(/'/g,"\\'")}',${po.lambdaHome||'null'},${po.lambdaAway||'null'},${p.homeWinProb},${p.drawProb},${p.awayWinProb});return false" style="cursor:pointer" title="Open in Algorithm tab">🔬 Algorithm Breakdown${lcBadge} <span style="color:var(--mut);font-weight:400;font-size:9px;margin-left:4px">— Dixon-Coles Poisson + Bayesian Elo</span><span style="margin-left:auto;font-size:9px;color:var(--acc)">↗ open heatmap</span></div>
+      <div class="factors-title" onclick="goToAlgo('${g.home.replace(/'/g,"\\'")}','${g.away.replace(/'/g,"\\'")}',${po.lambdaHome||'null'},${po.lambdaAway||'null'},${p.homeWinProb},${p.drawProb},${p.awayWinProb},${_suspH},${_suspA},'${_xgSrc}');return false" style="cursor:pointer" title="Open in Algorithm tab">🔬 Algorithm Breakdown${lcBadge} <span style="color:var(--mut);font-weight:400;font-size:9px;margin-left:4px">— Dixon-Coles Poisson + Bayesian Elo</span><span style="margin-left:auto;font-size:9px;color:var(--acc)">↗ open heatmap</span></div>
       ${poissonRow}
       ${mktRow}
       ${eloRow}
@@ -657,6 +659,19 @@ function card(g){
         <span style="font-size:10px;color:var(--dim);flex:1">${f.weather?.condition||'—'} · ${f.weather?.temp||'?'}°C</span>
         <span class="fw">adj</span>
       </div>
+      <div class="factor-row">
+        <span class="factor-name">xG source</span>
+        <span style="font-size:10px;color:var(--dim);flex:1">${g.summary?.xgSource==='shots'?'<span style="color:var(--grn)">Shots-based (ESPN)</span>':'Goals proxy'}</span>
+        <span class="fw">—</span>
+      </div>
+      ${f.suspensions ? `<div class="factor-row">
+        <span class="factor-name">Suspensions ⚠️</span>
+        <span style="font-size:10px;flex:1">${[
+          f.suspensions.home>0?`<span style="color:var(--red)">🟥 ${g.home}: ${f.suspensions.home} suspended</span>`:'',
+          f.suspensions.away>0?`<span style="color:var(--red)">🟥 ${g.away}: ${f.suspensions.away} suspended</span>`:'',
+        ].filter(Boolean).join(' · ')}</span>
+        <span class="fw">−6%λ</span>
+      </div>` : ''}
     </div>`;
   }
 
@@ -1038,6 +1053,11 @@ async function updateHeatmap(){
     ? `<span style="color:var(--grn)">${hLabel}: <b>${finalHome}%</b></span><span style="color:var(--org)">Draw: <b>${finalDraw}%</b></span><span style="color:var(--acc)">${aLabel}: <b>${finalAway}%</b></span>`
     : '';
 
+  // Extra info from card override
+  const hmSuspHome = algoOverride?.suspHome || 0;
+  const hmSuspAway = algoOverride?.suspAway || 0;
+  const hmXgSource = algoOverride?.xgSource || 'proxy';
+
   let html=`<div class="heatmap-info">
     <div class="hm-lambda">λ<sub>home</sub> = <b>${lH.toFixed(2)}</b> &nbsp;·&nbsp; λ<sub>away</sub> = <b>${lA.toFixed(2)}</b>${fromCard?` <span style="font-size:9px;color:var(--pur);margin-left:6px">exact predictor values</span>`:''}</div>
     ${finalHome!=null ? `
@@ -1045,6 +1065,13 @@ async function updateHeatmap(){
       <div class="hm-probs" style="font-size:10px;color:var(--mut)">Poisson model only: ${poissonProbLine}</div>
       <div class="hm-probs">${fromCard ? 'Final prediction (Poisson + odds + Elo)' : 'Poisson + Elo blend (no market odds)'}: ${finalProbLine}</div>
     </div>` : `<div class="hm-probs">${poissonProbLine}</div>`}
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;font-size:10px;color:var(--dim)">
+      <span>xG source: ${hmXgSource==='shots'?'<span style="color:var(--grn)">Shots-based (ESPN)</span>':'<span style="color:var(--mut)">Goals proxy</span>'}</span>
+      ${(hmSuspHome>0||hmSuspAway>0)?`<span>${[
+        hmSuspHome>0?`<span style="color:var(--red)">🟥 ${hLabel}: ${hmSuspHome} suspended</span>`:'',
+        hmSuspAway>0?`<span style="color:var(--red)">🟥 ${aLabel}: ${hmSuspAway} suspended</span>`:'',
+      ].filter(Boolean).join(' · ')}</span>`:''}
+    </div>
   </div>
   <div class="heatmap-grid-wrap">
     <div class="hm-col-label">${aLabel} goals →</div>
@@ -1454,9 +1481,9 @@ function renderTeamDetail(){
 // plus the final blended win probabilities. Cleared when user picks new teams.
 let algoOverride = null;
 
-async function goToAlgo(home, away, lH, lA, finalHome, finalDraw, finalAway) {
+async function goToAlgo(home, away, lH, lA, finalHome, finalDraw, finalAway, suspHome=0, suspAway=0, xgSource='proxy') {
   // Store the exact λ and blended probs from the prediction card
-  algoOverride = (lH && lA) ? { lH, lA, finalHome, finalDraw, finalAway, home, away } : null;
+  algoOverride = (lH && lA) ? { lH, lA, finalHome, finalDraw, finalAway, home, away, suspHome, suspAway, xgSource } : null;
 
   // Switch to Algorithm tab
   const btn = [...document.querySelectorAll('.fb')].find(b => b.textContent.includes('Algorithm'));
