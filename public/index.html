@@ -433,6 +433,7 @@
     <button class="fb" onclick="setF('teams',this)">👥 Teams</button>
     <button class="fb" onclick="setF('algo',this)">📐 Algorithm</button>
     <div class="quota" id="quota" style="display:none"></div>
+    <div class="quota" id="quota-tip" style="display:none;color:var(--gld);border-color:rgba(251,191,36,0.3)">📅 Odds refresh July 1 — hit Refresh</div>
   </div>
   <div id="gc"><div class="state"><div class="ic">⚽</div><h3>Loading predictions…</h3></div></div>
 </main>
@@ -535,6 +536,8 @@ async function load(manual=false){
     dot.className=src==='live'?'dot ok':'dot';
     st.textContent=src==='live'?'Live data':src==='error'?'ESPN data (no odds)':'ESPN data';
     if(j.quota){const q=document.getElementById('quota');q.style.display='block';q.textContent=`API: ${j.quota.used} used · ${j.quota.remaining} left`;}
+    const tip=document.getElementById('quota-tip');
+    if(tip) tip.style.display=(src==='mock'||src==='error')?'block':'none';
     render(); renderSidebar(); cdVal=60; document.getElementById('cd').textContent=60;
   }catch(e){
     console.error('[load] failed:', e.message);

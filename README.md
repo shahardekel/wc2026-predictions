@@ -145,6 +145,7 @@ To avoid exhausting the bookmaker odds API:
 - **Odds TTL**: 12 hours — cached odds are reused between refreshes
 - **Auto-refresh** (every 60 s): uses `skipOdds=true` — does not consume quota
 - **Manual Refresh** button: fetches fresh odds and consumes one API request
+- **Free quota resets on the 1st of every month** — when the quota is exhausted the app shows a "📅 Odds refresh July 1 — hit Refresh" banner and continues running on ESPN data + Poisson predictions until the quota resets
 
 ---
 
