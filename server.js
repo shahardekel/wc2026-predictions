@@ -416,6 +416,8 @@ function buildGameList(oddsGames, espnMatches) {
   return result.sort((a,b) => {
     const o={live:0,soon:1,upcoming:2,finished:3};
     if (o[a.status]!==o[b.status]) return o[a.status]-o[b.status];
+    // Finished games: newest first; everything else: soonest first
+    if (a.status === 'finished') return new Date(b.commence)-new Date(a.commence);
     return new Date(a.commence)-new Date(b.commence);
   });
 }
