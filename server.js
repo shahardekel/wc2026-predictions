@@ -312,7 +312,11 @@ async function getOdds() {
   try {
     const url = `${ODDS_BASE}/sports/${SPORT}/odds/?apiKey=${ODDS_API_KEY}&regions=eu,uk,us&markets=h2h&oddsFormat=decimal&dateFormat=iso`;
     const r = await fetch(url);
-    if (!r.ok) { console.error("Odds API:", r.status); return { source:"error", games:[] }; }
+    if (!r.ok) {
+      console.error("Odds API:", r.status, r.statusText);
+      if (oddsCache.data) { console.log("Odds API failed — using stale cache"); return { source:"cached", ...oddsCache.data }; }
+      return { source:"mock", games:[] };
+    }
     const raw = await r.json();
     const remaining = r.headers.get("x-requests-remaining")||"?";
     const used = r.headers.get("x-requests-used")||"?";
@@ -321,7 +325,8 @@ async function getOdds() {
     return { source:"live", games, quota:{remaining,used} };
   } catch(e) {
     console.error("Odds error:", e.message);
-    return { source:"error", games:[] };
+    if (oddsCache.data) return { source:"cached", ...oddsCache.data };
+    return { source:"mock", games:[] };
   }
 }
 
