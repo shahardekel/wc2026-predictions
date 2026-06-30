@@ -232,56 +232,48 @@ function lookupNorm(obj, teamName) {
   return key !== undefined ? obj[key] : undefined;
 }
 
-// ─── LEAGUE-WIDE AVERAGE xG ──────────────────────────────────────────────────
-
-const LEAGUE_AVG_XG = (() => {
-  if (!WC_RESULTS.length) return 1.35;
-  const total = WC_RESULTS.reduce((s, r) => s + r.hxg + r.axg, 0);
-  return total / (WC_RESULTS.length * 2);
-})();
-
-// ─── ELO RATINGS ─────────────────────────────────────────────────────────────
-// Initialised from FIFA ranks, then updated with WC results (K=32).
-// A 30-point home edge is added when computing expected result in WC games
-// (the "home" team in the schedule has marginally more local support).
+// ─── MODEL BUILDER ───────────────────────────────────────────────────────────
+// buildModel(liveResults) merges liveResults with the hardcoded WC_RESULTS
+// (deduplicating by home+away normName) and returns { leagueAvgXg, eloRatings, teamStrengths }.
 
 const ELO_K = 32;
 
-const ELO_RATINGS = (() => {
-  const elo = {};
+function buildModel(liveResults) {
+  // Deduplicate: WC_RESULTS is authoritative; only add live games not already present
+  const wcKeys = new Set(WC_RESULTS.map(r => `${normName(r.home)}|${normName(r.away)}`));
+  const extra = (liveResults || []).filter(
+    r => !wcKeys.has(`${normName(r.home)}|${normName(r.away)}`)
+  );
+  const allResults = [...WC_RESULTS, ...extra];
+
+  // ── League-wide average xG ──
+  const leagueAvgXg = allResults.length
+    ? allResults.reduce((s, r) => s + r.hxg + r.axg, 0) / (allResults.length * 2)
+    : 1.35;
+
+  // ── Elo ratings ──
+  const eloRatings = {};
   // Prior: rank 1 → ~1890, rank 50 → ~1540
   for (const [team, rank] of Object.entries(FIFA_RANKINGS)) {
     const nn = normName(team);
-    if (elo[nn] === undefined) elo[nn] = Math.round(1890 - (rank - 1) * 7);
+    if (eloRatings[nn] === undefined) eloRatings[nn] = Math.round(1890 - (rank - 1) * 7);
   }
-  // Live WC update
-  for (const r of WC_RESULTS) {
+  for (const r of allResults) {
     const hn = normName(r.home), an = normName(r.away);
-    const eH = elo[hn] ?? 1550, eA = elo[an] ?? 1550;
+    const eH = eloRatings[hn] ?? 1550, eA = eloRatings[an] ?? 1550;
     const expH = 1 / (1 + Math.pow(10, (eA - eH + 30) / 400));
     const result = r.hg > r.ag ? 1 : r.hg === r.ag ? 0.5 : 0;
-    elo[hn] = (elo[hn] ?? 1550) + ELO_K * (result - expH);
-    elo[an] = (elo[an] ?? 1550) + ELO_K * ((1 - result) - (1 - expH));
+    eloRatings[hn] = (eloRatings[hn] ?? 1550) + ELO_K * (result - expH);
+    eloRatings[an] = (eloRatings[an] ?? 1550) + ELO_K * ((1 - result) - (1 - expH));
   }
-  return elo;
-})();
 
-// ─── BAYESIAN ATTACK / DEFENSE PARAMETERS ────────────────────────────────────
-// Each team gets an attack λ (expected goals scored vs average defence)
-// and a defense λ (expected goals conceded vs average attack).
-//
-// Prior is derived from FIFA rank + squad depth.
-// Posterior is a Bayesian blend: weight shifts toward observed as games increase.
-// Exponential decay (γ=0.62) means the most recent WC game counts most.
-
-const TEAM_STRENGTHS = (() => {
+  // ── Bayesian attack / defense parameters ──
   const strengths = {};
 
-  // Collect all team names we know about
   const allNames = new Set([
     ...Object.keys(FIFA_RANKINGS),
     ...Object.keys(SQUAD_DEPTH),
-    ...WC_RESULTS.flatMap(r => [r.home, r.away]),
+    ...allResults.flatMap(r => [r.home, r.away]),
   ]);
 
   for (const team of allNames) {
@@ -291,22 +283,17 @@ const TEAM_STRENGTHS = (() => {
     const rank  = lookupNorm(FIFA_RANKINGS, team) ?? 50;
     const depth = lookupNorm(SQUAD_DEPTH,   team) ?? 5;
 
-    // Attack prior: rank 1 ≈ 1.52 × avg, rank 50 ≈ 0.76 × avg
-    // Power chosen so top-5 produce ~2.0 xG/game vs average defense
     const rankAtkFactor  = Math.pow(50 / rank, 0.30);
     const depthAtkBoost  = Math.pow(depth / 5.5, 0.28);
-    const priorAttack    = LEAGUE_AVG_XG * rankAtkFactor * depthAtkBoost;
+    const priorAttack    = leagueAvgXg * rankAtkFactor * depthAtkBoost;
 
-    // Defense prior: rank 1 ≈ concedes 0.67 × avg, rank 50 ≈ 1.44 × avg
     const rankDefFactor  = Math.pow(rank / 50, 0.18);
-    const priorDefense   = LEAGUE_AVG_XG * rankDefFactor;
+    const priorDefense   = leagueAvgXg * rankDefFactor;
 
     strengths[nn] = { priorAttack, priorDefense, games: 0, attack: priorAttack, defense: priorDefense };
   }
 
-  // Accumulate WC 2026 results (newest→oldest, full weight)
-  // Then WC 2022 results (lower recency weight = 0.25×)
-  const teamObs = {}; // nn → [{xgFor, xgAgainst, w}]
+  const teamObs = {};
 
   const addResults = (results, recencyScale) => {
     for (let i = results.length - 1; i >= 0; i--) {
@@ -321,22 +308,20 @@ const TEAM_STRENGTHS = (() => {
     }
   };
 
-  addResults(WC_RESULTS, 1.0);    // current tournament — full weight
+  addResults(allResults, 1.0);      // current tournament (incl. injected) — full weight
   addResults(WC2022_RESULTS, 0.25); // 2022 history — 25% recency weight
 
-  const DECAY = 0.62; // per-position exponential decay within each source
+  const DECAY = 0.62;
 
   for (const [nn, obs] of Object.entries(teamObs)) {
     if (!strengths[nn]) continue;
     const s = strengths[nn];
 
-    // Count effective WC 2026 games for Bayesian blend weight
-    s.games = WC_RESULTS.filter(r =>
+    s.games = allResults.filter(r =>
       normName(r.home) === nn || normName(r.away) === nn
     ).length;
 
     let totalW = 0, wtXgFor = 0, wtXgAgainst = 0;
-    // Sort: 2026 first (recencyScale=1), then 2022 (recencyScale=0.25)
     const sorted = [...obs].sort((a, b) => b.recencyScale - a.recencyScale);
     sorted.forEach(({ xgFor, xgAgainst, recencyScale }, idx) => {
       const positionDecay = Math.pow(DECAY, idx);
@@ -349,7 +334,6 @@ const TEAM_STRENGTHS = (() => {
     const obsAttack  = wtXgFor     / totalW;
     const obsDefense = wtXgAgainst / totalW;
 
-    // Bayesian blend: effective sample size includes down-weighted historical games
     const effectiveN = s.games + obs.filter(o => o.recencyScale < 1).length * 0.25;
     const obsW = 1 - 1 / (1 + effectiveN * 0.70);
 
@@ -357,8 +341,47 @@ const TEAM_STRENGTHS = (() => {
     s.defense = obsW * obsDefense + (1 - obsW) * s.priorDefense;
   }
 
-  return strengths;
-})();
+  return { leagueAvgXg, eloRatings, teamStrengths: strengths };
+}
+
+// ─── MODULE-LEVEL MODEL STATE ────────────────────────────────────────────────
+// Initialised from WC_RESULTS only (same as before). Call injectLiveResults()
+// to rebuild the model incorporating freshly finished ESPN games.
+//
+// IMPORTANT: ELO_RATINGS and TEAM_STRENGTHS are intentionally single long-lived
+// objects that are mutated in place. This ensures any code that captured a
+// reference (including server.js destructuring) always sees the latest values.
+// LEAGUE_AVG_XG is a primitive so we expose it via module.exports reassignment
+// inside injectLiveResults — callers must read it as `predictor.LEAGUE_AVG_XG`
+// (not via a destructured local copy) to see updates.
+
+const _initial = buildModel([]);
+let LEAGUE_AVG_XG = _initial.leagueAvgXg;
+
+// Mutable objects — mutated in-place by injectLiveResults
+const ELO_RATINGS   = _initial.eloRatings;
+const TEAM_STRENGTHS = _initial.teamStrengths;
+
+// Rebuild the model with live finished-game data injected from ESPN.
+// liveResults: array of { home, away, hg, ag, hxg, axg }
+function injectLiveResults(liveResults) {
+  const model = buildModel(liveResults);
+
+  // Update the primitive export via module.exports so callers using
+  // `predictor.LEAGUE_AVG_XG` (the live accessor pattern in server.js) see it.
+  LEAGUE_AVG_XG = model.leagueAvgXg;
+  module.exports.LEAGUE_AVG_XG = model.leagueAvgXg;
+
+  // Mutate ELO_RATINGS in-place so any reference to this object is updated.
+  for (const k of Object.keys(ELO_RATINGS)) delete ELO_RATINGS[k];
+  Object.assign(ELO_RATINGS, model.eloRatings);
+
+  // Mutate TEAM_STRENGTHS in-place.
+  for (const k of Object.keys(TEAM_STRENGTHS)) delete TEAM_STRENGTHS[k];
+  Object.assign(TEAM_STRENGTHS, model.teamStrengths);
+
+  console.log(`[predictor] Model rebuilt: ${(liveResults||[]).length} live game(s) injected, leagueAvgXg=${LEAGUE_AVG_XG.toFixed(3)}`);
+}
 
 // ─── POISSON + DIXON-COLES ENGINE ────────────────────────────────────────────
 
@@ -683,4 +706,4 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
   };
 }
 
-module.exports = { predict, getTeamForm, normName, FIFA_RANKINGS, TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs };
+module.exports = { predict, getTeamForm, normName, injectLiveResults, buildModel, FIFA_RANKINGS, TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs };

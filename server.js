@@ -2,7 +2,13 @@ const express = require("express");
 const fetch = require("node-fetch");
 const cors = require("cors");
 const path = require("path");
-const { predict, normName, getTeamForm, FIFA_RANKINGS, TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs } = require("./predictor");
+const predictor = require("./predictor");
+const { predict, normName, injectLiveResults, getTeamForm, FIFA_RANKINGS, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs } = predictor;
+// TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG are read via predictor.X so they
+// always reflect the latest values after injectLiveResults() rebuilds the model.
+function TEAM_STRENGTHS_live() { return predictor.TEAM_STRENGTHS; }
+function ELO_RATINGS_live()   { return predictor.ELO_RATINGS; }
+function LEAGUE_AVG_XG_live() { return predictor.LEAGUE_AVG_XG; }
 
 const app = express();
 const PORT = 3000;
@@ -64,10 +70,42 @@ const FORMATIONS = {
   "South Africa":"4-1-4-1","Iraq":"4-3-3","Curaçao":"4-4-2",
 };
 
+// ─── LIVE MODEL INJECTION ─────────────────────────────────────────────────────
+// Extract finished games from ESPN data and feed them into the prediction model.
+// Uses goals as an xG proxy (xg = goals * 0.85 + 0.15) — avoids per-game API calls.
+// Games already present in the hardcoded WC_RESULTS are skipped inside buildModel().
+let lastInjectionTs = 0;
+const INJECT_TTL = 120000; // re-inject at most once per 2 min (matches SCORES_TTL)
+
+function injectFromESPN(espnMatches) {
+  const now = Date.now();
+  if (now - lastInjectionTs < INJECT_TTL) return; // nothing new to inject
+
+  const liveResults = espnMatches
+    .filter(m =>
+      m.status === "FINISHED" &&
+      m.homeTeam && m.awayTeam &&
+      m.homeScore != null && m.awayScore != null &&
+      !m.homeTeam.includes("Place") && !m.homeTeam.includes("Winner")
+    )
+    .map(m => ({
+      home: m.homeTeam,
+      away: m.awayTeam,
+      hg:   m.homeScore,
+      ag:   m.awayScore,
+      hxg:  +(m.homeScore * 0.85 + 0.15).toFixed(2),
+      axg:  +(m.awayScore * 0.85 + 0.15).toFixed(2),
+    }));
+
+  injectLiveResults(liveResults);
+  lastInjectionTs = now;
+}
+
 // ─── ENDPOINTS ───────────────────────────────────────────────────────────────
 app.get("/api/odds", async (req, res) => {
   try {
     const [oddsResult, espnMatches] = await Promise.all([getOdds(), getESPN()]);
+    injectFromESPN(espnMatches);
     const games = buildGameList(oddsResult.games, espnMatches);
 
     // Enrich upcoming games with algorithm predictions
@@ -485,7 +523,7 @@ app.get("/api/player-photo/:name", async (req, res) => {
 // ─── ALGORITHM DATA ──────────────────────────────────────────────────────────
 app.get("/api/algo-data", (req, res) => {
   // Build sorted team strength array for visualizations
-  const teamStrengths = Object.entries(TEAM_STRENGTHS)
+  const teamStrengths = Object.entries(TEAM_STRENGTHS_live())
     .map(([nn, s]) => ({
       nn,
       attack:       +s.attack.toFixed(3),
@@ -502,12 +540,12 @@ app.get("/api/algo-data", (req, res) => {
     const nn = normName(k);
     if (!nameByNorm[nn]) nameByNorm[nn] = k;
   }
-  const eloRatings = Object.entries(ELO_RATINGS)
+  const eloRatings = Object.entries(ELO_RATINGS_live())
     .map(([nn, elo]) => ({ name: nameByNorm[nn] || nn, nn, elo: Math.round(elo) }))
     .sort((a, b) => b.elo - a.elo);
 
   res.json({
-    leagueAvg: +LEAGUE_AVG_XG.toFixed(3),
+    leagueAvg: +LEAGUE_AVG_XG_live().toFixed(3),
     teamStrengths,
     eloRatings,
     wc2026Count: WC_RESULTS.length,
@@ -524,6 +562,9 @@ app.get("/api/lambda", async (req, res) => {
     const home = req.query.home || "France";
     const away = req.query.away || "England";
     const hn = normName(home), an = normName(away);
+    const TEAM_STRENGTHS = TEAM_STRENGTHS_live();
+    const ELO_RATINGS    = ELO_RATINGS_live();
+    const LEAGUE_AVG_XG  = LEAGUE_AVG_XG_live();
 
     const hStr = TEAM_STRENGTHS[hn] || { attack: LEAGUE_AVG_XG, defense: LEAGUE_AVG_XG };
     const aStr = TEAM_STRENGTHS[an] || { attack: LEAGUE_AVG_XG, defense: LEAGUE_AVG_XG };
