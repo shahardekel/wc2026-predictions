@@ -537,7 +537,8 @@ async function load(manual=false){
     st.textContent=src==='live'?'Live data':src==='error'?'ESPN data (no odds)':'ESPN data';
     if(j.quota){const q=document.getElementById('quota');q.style.display='block';q.textContent=`API: ${j.quota.used} used · ${j.quota.remaining} left`;}
     const tip=document.getElementById('quota-tip');
-    if(tip) tip.style.display=(src==='mock'||src==='error')?'block':'none';
+    const hasOdds=games.some(g=>g.bookmakerCount>0);
+    if(tip) tip.style.display=hasOdds?'none':'block';
     render(); renderSidebar(); cdVal=60; document.getElementById('cd').textContent=60;
   }catch(e){
     console.error('[load] failed:', e.message);
