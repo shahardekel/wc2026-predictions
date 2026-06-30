@@ -4,3 +4,4 @@ node_modules/
 .claude/
 *.log
 .DS_Store
+.odds-cache.json

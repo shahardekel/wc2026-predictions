@@ -2,6 +2,7 @@ const express = require("express");
 const fetch = require("node-fetch");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
 const predictor = require("./predictor");
 const { predict, normName, injectLiveResults, getTeamForm, FIFA_RANKINGS, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs } = predictor;
 // TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG are read via predictor.X so they
@@ -40,7 +41,20 @@ const VENUES = {
   "Jordan-Argentina":"Dallas",
 };
 
-let oddsCache     = { data:null, ts:0 };
+const ODDS_CACHE_FILE = path.join(__dirname, ".odds-cache.json");
+function loadOddsCacheFromDisk() {
+  try {
+    const raw = fs.readFileSync(ODDS_CACHE_FILE, "utf8");
+    const saved = JSON.parse(raw);
+    if (saved && saved.data && saved.ts) return saved;
+  } catch(_) {}
+  return { data:null, ts:0 };
+}
+function saveOddsCacheToDisk(cache) {
+  try { fs.writeFileSync(ODDS_CACHE_FILE, JSON.stringify(cache)); } catch(_) {}
+}
+let oddsCache = loadOddsCacheFromDisk();
+if (oddsCache.data) console.log("✅  Loaded persisted odds cache from disk");
 let scoresCache   = { data:null, ts:0 };
 let predCache     = {};  // team pair → prediction
 let summaryCache  = {};  // espnId → { data, ts }
@@ -325,6 +339,7 @@ async function getOdds() {
     const used = r.headers.get("x-requests-used")||"?";
     const games = transformOdds(raw);
     oddsCache = { data:{ games, quota:{remaining,used} }, ts:now };
+    saveOddsCacheToDisk(oddsCache);
     return { source:"live", games, quota:{remaining,used} };
   } catch(e) {
     console.error("Odds error:", e.message);
