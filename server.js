@@ -81,7 +81,7 @@ const INJECT_TTL = 120000; // re-inject at most once per 2 min (matches SCORES_T
 
 function injectFromESPN(espnMatches) {
   const now = Date.now();
-  if (now - lastInjectionTs < INJECT_TTL) return; // nothing new to inject
+  if (lastInjectionTs > 0 && now - lastInjectionTs < INJECT_TTL) return; // nothing new to inject
 
   const liveResults = espnMatches
     .filter(m =>
