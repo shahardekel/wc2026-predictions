@@ -679,6 +679,26 @@ function card(g){
         ].filter(Boolean).join(' · ')}</span>
         <span class="fw">−6%λ</span>
       </div>` : ''}
+      ${(f.yellowCards?.home||0)+(f.yellowCards?.away||0)>0 ? `<div class="factor-row">
+        <span class="factor-name">🟨 Yellow cards</span>
+        <span style="font-size:10px;color:var(--dim);flex:1">${g.home}: ${f.yellowCards?.home||0} · ${g.away}: ${f.yellowCards?.away||0}</span>
+        <span class="fw">${[(f.yellowCards?.home||0)>=4?'−3%H':'',(f.yellowCards?.away||0)>=4?'−3%A':''].filter(Boolean).join(' ')|| '—'}</span>
+      </div>` : ''}
+      ${(f.restDays?.home!=null||f.restDays?.away!=null) ? `<div class="factor-row">
+        <span class="factor-name">😴 Rest days</span>
+        <span style="font-size:10px;color:var(--dim);flex:1">${g.home}: ${f.restDays?.home!=null?f.restDays.home+'d':'?'} · ${g.away}: ${f.restDays?.away!=null?f.restDays.away+'d':'?'}</span>
+        <span class="fw" style="color:${(f.restDays?.home<5||f.restDays?.away<5)?'var(--org)':'var(--mut)'}">${(f.restDays?.home<4||f.restDays?.away<4)?'−7%λ':(f.restDays?.home<5||f.restDays?.away<5)?'−4%λ':'ok'}</span>
+      </div>` : ''}
+      ${f.isKnockout ? `<div class="factor-row">
+        <span class="factor-name">🏆 Knockout</span>
+        <span style="font-size:10px;color:var(--gld);flex:1">Post-group stage — conservative play</span>
+        <span class="fw" style="color:var(--gld)">−6%λ</span>
+      </div>` : ''}
+      ${f.isKnockout && f.penaltyRisk ? `<div class="factor-row">
+        <span class="factor-name">🥅 Penalty risk</span>
+        <span style="font-size:10px;color:var(--dim);flex:1">${g.home}: <span style="color:${(f.penaltyRisk.home||50)>=55?'var(--grn)':'var(--red)'}">${f.penaltyRisk.home!=null?f.penaltyRisk.home+'%':'?'}</span> shootout win · ${g.away}: <span style="color:${(f.penaltyRisk.away||50)>=55?'var(--grn)':'var(--red)'}">${f.penaltyRisk.away!=null?f.penaltyRisk.away+'%':'?'}</span></span>
+        <span class="fw">hist</span>
+      </div>` : ''}
     </div>`;
   }
 
@@ -838,18 +858,42 @@ function buildAlgoPage(d){
           <div class="algo-card-desc">Elo ratings initialised from FIFA rankings (K=32), updated live after each WC 2026 result. Used as a calibration cross-check.</div>
         </div>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
-        <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
-          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Live xG from shots + possession + corners</div>
-          <div style="font-size:11px;color:var(--dim);line-height:1.5">xG = SoT×0.30 + off-target×0.04 + corners×0.04 + (possession−50%)×0.005. Falls back to goals proxy until ESPN boxscore is cached.</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Shots-based xG</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">SoT×0.30 + off-target×0.04 + corners×0.04 + (poss−50%)×0.005. Live ESPN boxscore, falls back to goals proxy.</div>
         </div>
-        <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
-          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🟥 Red card suspensions</div>
-          <div style="font-size:11px;color:var(--dim);line-height:1.5">If a team received a red card in their most recent game, their attacking λ is reduced by 6% per suspended player. Shown as a warning on the heatmap when applicable.</div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">⚡ Recent form weight</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">Each team's last 3 WC games carry 2× weight in the Bayesian update — hot or cold streaks shift predictions immediately.</div>
         </div>
-        <div style="flex:1;min-width:200px;background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
-          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🔄 Auto-updating model</div>
-          <div style="font-size:11px;color:var(--dim);line-height:1.5">Every 2 minutes, finished games are re-injected into the Bayesian model. Elo ratings and team attack/defense parameters update automatically as results come in.</div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📉 Goals conceded trend</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">If a team's last 3 xG conceded > earlier average, their defense parameter is penalised up to +12% for opponents.</div>
+        </div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🎭 Manager style index</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">Attacking managers (Spain +1.6, Brazil +1.5) boost λ. Defensive setups (Uruguay −1.5, Iran −1.5) reduce it. ±3% per style point.</div>
+        </div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">😴 Rest days fatigue</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">&lt;4 days since last game → λ×0.93. 4–5 days → λ×0.96. Calculated from ESPN fixture dates automatically.</div>
+        </div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">👴 Squad age fatigue</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">Older squads (avg age &gt;28.5) in game 4+ face up to 6% λ penalty as tournament length takes its toll.</div>
+        </div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🟨 Yellow card caution</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">4+ accumulated yellows → λ×0.97. Players on yellow play more conservatively to avoid suspension.</div>
+        </div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🏆 Knockout pressure</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">Post-group-stage games: λ×0.94 for both teams. Knockout football is more cautious — lower scoring, higher draw probability.</div>
+        </div>
+        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🥅 Penalty history</div>
+          <div style="font-size:11px;color:var(--dim);line-height:1.5">Historical shootout win rates shown in knockout game breakdowns. England 38% vs France 67% — relevant when draw probability is high.</div>
         </div>
       </div>
     </div>
@@ -896,6 +940,28 @@ function buildAlgoPage(d){
           <div class="algo-eq">Elo' = Elo + 32 × (result − E)</div>
           <div class="algo-eq-note">E = 1/(1 + 10<sup>(Elo<sub>opp</sub>−Elo+30)/400</sup>)</div>
           <div class="algo-eq-note">result: 1=win, 0.5=draw, 0=loss &nbsp;·&nbsp; +30=home edge</div>
+        </div>
+        <div class="algo-math-block">
+          <div class="algo-math-title">Live contextual λ adjustments</div>
+          <div class="algo-eq-small">× 0.94<sup>suspensions</sup> &nbsp;red card ban</div>
+          <div class="algo-eq-small">× 0.94 &nbsp;knockout stage (both teams)</div>
+          <div class="algo-eq-small">× 0.93–0.96 &nbsp;fatigue (&lt;5 rest days)</div>
+          <div class="algo-eq-small">× 0.94–1.00 &nbsp;squad age &gt;28.5 in game 4+</div>
+          <div class="algo-eq-small">× 0.97 &nbsp;4+ yellow cards accumulated</div>
+          <div class="algo-eq-small">× (1 + style×0.03) &nbsp;manager style index</div>
+        </div>
+        <div class="algo-math-block">
+          <div class="algo-math-title">Shots-based xG formula</div>
+          <div class="algo-eq-small">xG = SoT×<span style="color:var(--grn)">0.30</span> + offTarget×<span style="color:var(--org)">0.04</span></div>
+          <div class="algo-eq-small">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ corners×<span style="color:var(--pur)">0.04</span> + (poss−0.5)×<span style="color:var(--acc)">0.50</span></div>
+          <div class="algo-eq-note">Minimum xG = 0.10 &nbsp;·&nbsp; fallback: goals×0.85+0.15</div>
+        </div>
+        <div class="algo-math-block">
+          <div class="algo-math-title">Recent form weighting</div>
+          <div class="algo-eq-small">last 3 games: recencyScale × <span style="color:var(--grn)">2.0</span></div>
+          <div class="algo-eq-small">older games: recencyScale × <span style="color:var(--mut)">1.0</span></div>
+          <div class="algo-eq-small">WC 2022 history: × <span style="color:var(--mut)">0.25</span></div>
+          <div class="algo-eq-note">+ position decay: w = DECAY<sup>idx</sup> (DECAY=0.62)</div>
         </div>
       </div>
     </div>

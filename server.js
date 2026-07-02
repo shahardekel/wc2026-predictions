@@ -147,6 +147,7 @@ function injectFromESPN(espnMatches) {
 
   injectLiveResults(liveResults);
   lastInjectionTs = now;
+  predCache = {}; // clear so next request recomputes with updated model
 }
 
 // ─── ENDPOINTS ───────────────────────────────────────────────────────────────
