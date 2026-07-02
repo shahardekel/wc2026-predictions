@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: wc2026-predictions
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: ODDS_API_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
