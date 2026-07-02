@@ -93,18 +93,25 @@ const FORMATIONS = {
 let lastInjectionTs = 0;
 const INJECT_TTL = 120000; // re-inject at most once per 2 min (matches SCORES_TTL)
 
+let lastFinishedGameKey = '';
+
 function injectFromESPN(espnMatches) {
   const now = Date.now();
-  if (lastInjectionTs > 0 && now - lastInjectionTs < INJECT_TTL) return; // nothing new to inject
+  if (lastInjectionTs > 0 && now - lastInjectionTs < INJECT_TTL) return;
 
-  const liveResults = espnMatches
-    .filter(m =>
-      m.status === "FINISHED" &&
-      m.homeTeam && m.awayTeam &&
-      m.homeScore != null && m.awayScore != null &&
-      !m.homeTeam.includes("Place") && !m.homeTeam.includes("Winner")
-    )
-    .map(m => {
+  const finished = espnMatches.filter(m =>
+    m.status === "FINISHED" &&
+    m.homeTeam && m.awayTeam &&
+    m.homeScore != null && m.awayScore != null &&
+    !m.homeTeam.includes("Place") && !m.homeTeam.includes("Winner")
+  );
+
+  // Only clear predCache when a new game has finished — not on every poll
+  const finishedKey = finished.map(m => `${m.homeTeam}${m.homeScore}-${m.awayScore}${m.awayTeam}`).join('|');
+  const newGameFinished = finishedKey !== lastFinishedGameKey;
+  lastFinishedGameKey = finishedKey;
+
+  const liveResults = finished.map(m => {
       const espnId = m.id || m.espnId;
       const bc = espnId ? boxscoreCache[espnId] : null;
       let hxg, axg;
@@ -115,11 +122,9 @@ function injectFromESPN(espnMatches) {
         const awayPoss = bc.awayPossession != null ? bc.awayPossession : 0.5;
         const hCorners = bc.homeCorners || 0;
         const aCorners = bc.awayCorners || 0;
-        // Combined xG: shots (primary) + corners (set pieces) + possession bonus
         hxg = +Math.max(0.10, (bc.homeShotsOnTarget||0)*0.30 + homeOff*0.04 + hCorners*0.04 + (homePoss-0.5)*0.5).toFixed(2);
         axg = +Math.max(0.10, (bc.awayShotsOnTarget||0)*0.30 + awayOff*0.04 + aCorners*0.04 + (awayPoss-0.5)*0.5).toFixed(2);
       } else {
-        // Fallback: goals proxy
         hxg = +(m.homeScore * 0.85 + 0.15).toFixed(2);
         axg = +(m.awayScore * 0.85 + 0.15).toFixed(2);
       }
@@ -147,7 +152,10 @@ function injectFromESPN(espnMatches) {
 
   injectLiveResults(liveResults);
   lastInjectionTs = now;
-  predCache = {}; // clear so next request recomputes with updated model
+  if (newGameFinished) {
+    predCache = {}; // only invalidate predictions when a game result actually changed
+    console.log('[inject] new finished game detected — predCache cleared');
+  }
 }
 
 // ─── ENDPOINTS ───────────────────────────────────────────────────────────────
