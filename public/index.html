@@ -433,6 +433,7 @@
     <button class="fb" onclick="setF('teams',this)">👥 Teams</button>
     <button class="fb" onclick="setF('algo',this)">📐 Algorithm</button>
     <div class="quota" id="quota" style="display:none"></div>
+    <div class="quota" id="odds-fetched-at" style="display:none;color:var(--mut)"></div>
     <div class="quota" id="quota-tip" style="display:none;color:var(--gld);border-color:rgba(251,191,36,0.3)">📅 Odds refresh July 1 — hit Refresh</div>
   </div>
   <div id="gc"><div class="state"><div class="ic">⚽</div><h3>Loading predictions…</h3></div></div>
@@ -536,6 +537,17 @@ async function load(manual=false){
     dot.className=src==='live'?'dot ok':'dot';
     st.textContent=src==='live'?'Live data':src==='error'?'ESPN data (no odds)':'ESPN data';
     if(j.quota){const q=document.getElementById('quota');q.style.display='block';q.textContent=`API: ${j.quota.used} used · ${j.quota.remaining} left`;}
+    const ofa=document.getElementById('odds-fetched-at');
+    if(ofa){if(j.oddsFetchedAt){const ago=Math.round((Date.now()-j.oddsFetchedAt)/60000);const agoStr=ago<60?`${ago}m ago`:ago<1440?`${Math.round(ago/60)}h ago`:`${Math.round(ago/1440)}d ago`;ofa.style.display='block';ofa.textContent=`🕐 Odds fetched ${agoStr}`;}else{ofa.style.display='none';}}
+    const fetchedEl=document.getElementById('odds-fetched-at');
+    if(fetchedEl){
+      if(j.oddsFetchedAt){
+        const diff=Date.now()-j.oddsFetchedAt;
+        const mins=Math.floor(diff/60000),hrs=Math.floor(mins/60);
+        const ago=hrs>0?`${hrs}h ${mins%60}m ago`:mins>0?`${mins}m ago`:'just now';
+        fetchedEl.textContent=`Odds fetched: ${ago}`;fetchedEl.style.display='block';
+      }else{fetchedEl.style.display='none';}
+    }
     const tip=document.getElementById('quota-tip');
     const hasOdds=games.some(g=>g.bookmakerCount>0);
     if(tip) tip.style.display=hasOdds?'none':'block';
@@ -653,6 +665,18 @@ function card(g){
     </div>`;
     const _suspH = f.suspensions?.home||0, _suspA = f.suspensions?.away||0;
     const _xgSrc = g.summary?.xgSource==='shots'?'shots':'proxy';
+    // Store extra factors in global map (avoids JSON-in-onclick quoting issues)
+    const _gameKey = `${g.home}|${g.away}`;
+    window._gameFactorsMap = window._gameFactorsMap || {};
+    window._gameFactorsMap[_gameKey] = {
+      yellowCards: f.yellowCards,
+      restDays: f.restDays,
+      isKnockout: f.isKnockout,
+      penaltyRisk: f.penaltyRisk,
+      managerStyle: f.managerStyle,
+      squadAge: f.squadAge,
+      attackDefense: f.attackDefense,
+    };
     factorHTML=`<div class="factors">
       <div class="factors-title" onclick="goToAlgo('${g.home.replace(/'/g,"\\'")}','${g.away.replace(/'/g,"\\'")}',${po.lambdaHome||'null'},${po.lambdaAway||'null'},${p.homeWinProb},${p.drawProb},${p.awayWinProb},${_suspH},${_suspA},'${_xgSrc}');return false" style="cursor:pointer" title="Open in Algorithm tab">🔬 Algorithm Breakdown${lcBadge} <span style="color:var(--mut);font-weight:400;font-size:9px;margin-left:4px">— Dixon-Coles Poisson + Bayesian Elo</span><span style="margin-left:auto;font-size:9px;color:var(--acc)">↗ open heatmap</span></div>
       ${poissonRow}
@@ -1203,6 +1227,7 @@ async function updateHeatmap(){
   const hmSuspHome = algoOverride?.suspHome || 0;
   const hmSuspAway = algoOverride?.suspAway || 0;
   const hmXgSource = algoOverride?.xgSource || 'proxy';
+  const hmExtra = algoOverride?.extraFactors || null;
 
   let html=`<div class="heatmap-info">
     <div class="hm-lambda">λ<sub>home</sub> = <b>${lH.toFixed(2)}</b> &nbsp;·&nbsp; λ<sub>away</sub> = <b>${lA.toFixed(2)}</b>${fromCard?` <span style="font-size:9px;color:var(--pur);margin-left:6px">exact predictor values</span>`:''}</div>
@@ -1218,6 +1243,17 @@ async function updateHeatmap(){
         hmSuspAway>0?`<span style="color:var(--red)">🟥 ${aLabel}: ${hmSuspAway} suspended</span>`:'',
       ].filter(Boolean).join(' · ')}</span>`:''}
     </div>
+    ${hmExtra ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bor);font-size:10px">
+      ${hmExtra.isKnockout ? `<span style="background:rgba(251,191,36,0.15);color:var(--gld);padding:2px 7px;border-radius:12px;border:1px solid rgba(251,191,36,0.3)">🏆 Knockout −6%λ</span>` : '<span style="background:var(--sur2);color:var(--mut);padding:2px 7px;border-radius:12px">Group stage</span>'}
+      ${(hmExtra.yellowCards?.home||0)>=4 ? `<span style="background:rgba(234,179,8,0.15);color:#ca8a04;padding:2px 7px;border-radius:12px;border:1px solid rgba(234,179,8,0.3)">🟨 ${hLabel} ${hmExtra.yellowCards.home} yellows −3%λ</span>` : ''}
+      ${(hmExtra.yellowCards?.away||0)>=4 ? `<span style="background:rgba(234,179,8,0.15);color:#ca8a04;padding:2px 7px;border-radius:12px;border:1px solid rgba(234,179,8,0.3)">🟨 ${aLabel} ${hmExtra.yellowCards.away} yellows −3%λ</span>` : ''}
+      ${(hmExtra.restDays?.home!=null&&hmExtra.restDays.home<5) ? `<span style="background:rgba(251,146,60,0.15);color:var(--org);padding:2px 7px;border-radius:12px;border:1px solid rgba(251,146,60,0.3)">😴 ${hLabel} ${hmExtra.restDays.home}d rest ${hmExtra.restDays.home<4?'−7%':'−4%'}λ</span>` : ''}
+      ${(hmExtra.restDays?.away!=null&&hmExtra.restDays.away<5) ? `<span style="background:rgba(251,146,60,0.15);color:var(--org);padding:2px 7px;border-radius:12px;border:1px solid rgba(251,146,60,0.3)">😴 ${aLabel} ${hmExtra.restDays.away}d rest ${hmExtra.restDays.away<4?'−7%':'−4%'}λ</span>` : ''}
+      ${(hmExtra.managerStyle?.home!=null&&Math.abs(hmExtra.managerStyle.home)>0.3) ? `<span style="background:var(--sur2);color:${hmExtra.managerStyle.home>0?'var(--grn)':'var(--acc)'};padding:2px 7px;border-radius:12px">${hLabel} style ${hmExtra.managerStyle.home>0?'⚡ attacking':'🛡 defensive'}</span>` : ''}
+      ${(hmExtra.managerStyle?.away!=null&&Math.abs(hmExtra.managerStyle.away)>0.3) ? `<span style="background:var(--sur2);color:${hmExtra.managerStyle.away>0?'var(--grn)':'var(--acc)'};padding:2px 7px;border-radius:12px">${aLabel} style ${hmExtra.managerStyle.away>0?'⚡ attacking':'🛡 defensive'}</span>` : ''}
+      ${(hmExtra.isKnockout&&hmExtra.penaltyRisk) ? `<span style="background:var(--sur2);color:var(--mut);padding:2px 7px;border-radius:12px">🥅 Penalties: ${hLabel} ${hmExtra.penaltyRisk.home??'?'}% · ${aLabel} ${hmExtra.penaltyRisk.away??'?'}%</span>` : ''}
+      ${(hmExtra.attackDefense?.homeGames!=null) ? `<span style="background:var(--sur2);color:var(--dim);padding:2px 7px;border-radius:12px">📊 Data: ${hmExtra.attackDefense.homeGames}/${hmExtra.attackDefense.awayGames} WC games</span>` : ''}
+    </div>` : ''}
   </div>
   <div class="heatmap-grid-wrap">
     <div class="hm-col-label">${aLabel} goals →</div>
@@ -1334,6 +1370,50 @@ async function selectTeam(team){
   }catch(e){ /* show without roster */ }
 }
 
+// Extract algo prediction data for a named team from the live games list
+function getTeamAlgoData(teamName) {
+  const norm = s => s.toLowerCase().replace(/[^a-z]/g,'');
+  const tn = norm(teamName);
+  let best = null;
+  for (const g of games) {
+    const p = g.prediction; if (!p) continue;
+    const f = p.factors || {};
+    const ad = f.attackDefense || {};
+    const gh = norm(g.home), ga = norm(g.away);
+    const isHome = gh === tn || gh.startsWith(tn.substring(0,5)) || tn.startsWith(gh.substring(0,5));
+    const isAway = ga === tn || ga.startsWith(tn.substring(0,5)) || tn.startsWith(ga.substring(0,5));
+    if (!isHome && !isAway) continue;
+    const side = isHome ? 'home' : 'away';
+    const rec = {
+      elo:          f.elo?.[side]          ?? null,
+      attack:       isHome ? ad.homeAttack  : ad.awayAttack,
+      defense:      isHome ? ad.homeDefense : ad.awayDefense,
+      leagueAvg:    ad.leagueAvg           ?? 1.5,
+      managerStyle: f.managerStyle?.[side] ?? null,
+      yellowCards:  f.yellowCards?.[side]  ?? null,
+      restDays:     f.restDays?.[side]     ?? null,
+      isKnockout:   f.isKnockout           ?? false,
+      penaltyRisk:  f.penaltyRisk          ?? null,
+      depth:        f.depth?.[side]        ?? null,
+      opponent:     isHome ? g.away        : g.home,
+      opponentFlag: isHome ? g.awayFlag    : g.homeFlag,
+      status:       g.status,
+    };
+    if (!best || g.status === 'soon') best = rec;
+    if (g.status === 'soon') break;
+  }
+  return best;
+}
+
+function mgrStyleLabel(v) {
+  if (v == null) return null;
+  if (v >  1.2) return {label:'Very Attacking',color:'var(--org)',icon:'⚡'};
+  if (v >  0.4) return {label:'Attacking',      color:'var(--grn)',icon:'↗'};
+  if (v > -0.4) return {label:'Balanced',        color:'var(--dim)',icon:'⇌'};
+  if (v > -1.2) return {label:'Defensive',       color:'var(--acc)',icon:'↙'};
+  return               {label:'Very Defensive',  color:'var(--acc)',icon:'🛡'};
+}
+
 function renderTeams(){
   if(filter!=='teams') return;
   const gc=document.getElementById('gc');
@@ -1341,17 +1421,23 @@ function renderTeams(){
   const cards=teamsData.map(t=>{
     const f=t.form||{};
     const results=[];
-    // build form dots from WC results
     const w=f.pts>=3?(f.pts/3|0):0, d=f.played?f.pts-w*3>0?1:0:0, l=f.played-(w+(d>0?1:0));
     for(let i=0;i<Math.min(f.played||0,5);i++) results.push(i<w?'w':i<w+(d>0?1:0)?'d':'l');
     const dots=results.map(r=>`<div class="tc-dot ${r}"></div>`).join('')||'<span style="font-size:9px;color:var(--mut)">No games</span>';
     const c='#'+(t.color||'253047');
+    const algo=getTeamAlgoData(t.name);
+    const mgr=mgrStyleLabel(algo?.managerStyle);
     return `<div class="tcard" onclick="selectTeam(${JSON.stringify(t).replace(/"/g,'&quot;')})">
       <div class="tc-stripe" style="background:${c}"></div>
       <div class="tc-flag">${t.flag}</div>
       <div class="tc-name">${t.name}</div>
       <div class="tc-rank">FIFA #${t.fifaRank}</div>
       <div class="tc-form">${dots}</div>
+      ${algo ? `<div style="display:flex;gap:4px;margin-top:5px;justify-content:center;flex-wrap:wrap">
+        ${algo.elo ? `<span style="font-size:9px;color:var(--acc);background:rgba(59,130,246,.13);border-radius:4px;padding:1px 5px">Elo ${algo.elo}</span>` : ''}
+        ${algo.attack!=null ? `<span style="font-size:9px;color:var(--org);background:rgba(249,115,22,.13);border-radius:4px;padding:1px 5px">Atk ${algo.attack.toFixed(2)}</span>` : ''}
+        ${mgr ? `<span style="font-size:9px;color:${mgr.color};background:rgba(255,255,255,.06);border-radius:4px;padding:1px 5px">${mgr.icon} ${mgr.label}</span>` : ''}
+      </div>` : ''}
     </div>`;
   }).join('');
   gc.innerHTML=`<div style="margin-bottom:14px"><span style="font-size:11px;color:var(--mut)">All 48 World Cup teams · Click to view stats & squad</span></div><div class="team-grid">${cards}</div>`;
@@ -1608,6 +1694,72 @@ function renderTeamDetail(){
       ${teamRoster?statBox(teamRoster.teamAssists,'Assists','var(--acc)'):''}
       ${teamRoster?statBox(teamRoster.teamShotsOnTarget,'SoT','var(--dim)'):''}
     </div>
+    ${(()=>{
+      const algo=getTeamAlgoData(t.name);
+      if(!algo) return '';
+      const avg=algo.leagueAvg||1.5;
+      const atkPct=Math.min(100,Math.round((algo.attack||0)/Math.max(avg*2.5,1)*100));
+      const defPct=algo.defense!=null?Math.max(0,Math.round((1-((algo.defense-avg*.25)/(avg*1.5)))*100)):null;
+      const mgr=mgrStyleLabel(algo.managerStyle);
+      const yc=algo.yellowCards??0;
+      const ycColor=yc>=5?'var(--red)':yc>=3?'var(--gld)':'var(--grn)';
+      const bar=(pct,color,w='100%')=>`<div style="height:6px;border-radius:3px;background:var(--bor);overflow:hidden;width:${w}"><div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width .4s"></div></div>`;
+      const nextGame=algo.status==='soon'?`<span style="font-size:10px;color:var(--mut)">Next: ${algo.opponentFlag||''} ${algo.opponent}</span>`:'';
+      return `<div class="td-section">🤖 AI Model Factors</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:18px">
+
+        <div class="td-chart" style="margin:0">
+          <div class="td-chart-title">⚡ Bayesian Elo Rating</div>
+          ${algo.elo ? `
+          <div style="font-size:26px;font-weight:800;color:var(--acc);margin:4px 0">${algo.elo}</div>
+          ${bar(Math.min(100,Math.round((algo.elo-1600)/4.5)),'var(--acc)')}
+          <div style="font-size:9px;color:var(--mut);margin-top:5px">Range 1600–2050 · Updated after each WC result${nextGame?'&nbsp;·&nbsp;'+nextGame.replace(/<[^>]*>/g,''):''}</div>
+          ` : '<div style="color:var(--mut);font-size:11px">No upcoming game</div>'}
+        </div>
+
+        <div class="td-chart" style="margin:0">
+          <div class="td-chart-title">🎯 xG Strength (Bayesian)</div>
+          ${algo.attack!=null ? `
+          <div style="display:flex;flex-direction:column;gap:7px;margin-top:4px">
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--mut)">Attack</span><span style="color:var(--org);font-weight:700">${algo.attack.toFixed(2)} <span style="color:var(--mut);font-weight:400">vs avg ${avg.toFixed(2)}</span></span></div>
+              ${bar(atkPct,'var(--org)')}
+            </div>
+            ${defPct!=null?`<div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--mut)">Defense</span><span style="color:${algo.defense<avg?'var(--grn)':'var(--red)'};font-weight:700">${algo.defense.toFixed(2)} conceded <span style="color:var(--mut);font-weight:400">(${algo.defense<avg?'solid':'leaky'})</span></span></div>
+              ${bar(defPct,algo.defense<avg?'var(--grn)':'var(--red)')}
+            </div>`:''}
+          </div>
+          <div style="font-size:9px;color:var(--mut);margin-top:6px">λ inputs to Dixon-Coles Poisson model · ${algo.attack>avg*1.5?'Elite attack':algo.attack>avg?'Above avg attack':'Below avg attack'}</div>
+          ` : '<div style="color:var(--mut);font-size:11px">No data</div>'}
+        </div>
+
+        <div class="td-chart" style="margin:0">
+          <div class="td-chart-title">🧠 Manager Style</div>
+          ${mgr ? `
+          <div style="font-size:20px;font-weight:800;color:${mgr.color};margin:6px 0">${mgr.icon} ${mgr.label}</div>
+          <div style="font-size:10px;color:var(--mut)">Style score: <strong style="color:${mgr.color}">${algo.managerStyle>0?'+':''}${algo.managerStyle?.toFixed(1)}</strong> &nbsp;·&nbsp; ${algo.managerStyle>0.4?'boosts λ (more goals expected)':algo.managerStyle<-0.4?'reduces λ (fewer goals expected)':'neutral impact on λ'}</div>
+          <div style="font-size:9px;color:var(--mut);margin-top:4px">Derived from tournament shot rate vs formation</div>
+          ` : '<div style="color:var(--mut);font-size:11px">No data</div>'}
+        </div>
+
+        <div class="td-chart" style="margin:0">
+          <div class="td-chart-title">🟨 Discipline Risk</div>
+          <div style="font-size:26px;font-weight:800;color:${yc>=5?'var(--red)':yc>=3?'var(--gld)':'var(--grn)'};margin:4px 0">${yc} <span style="font-size:12px;font-weight:400">yellow${yc!==1?'s':''}</span></div>
+          <div style="font-size:10px;color:var(--mut)">${yc>=5?'⚠️ Suspension risk — −3% λ applied':yc>=3?'⚠️ Caution — approaching suspension threshold':'✓ Clean — no λ penalty'}</div>
+          ${algo.restDays!=null?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bor);font-size:10px;color:var(--mut)">😴 Rest: <strong style="color:${algo.restDays<3?'var(--red)':algo.restDays<5?'var(--gld)':'var(--grn)'}">${algo.restDays}d</strong> ${algo.restDays<3?'⚠️ Fatigue risk':algo.restDays>=5?'✓ Fresh':''}</div>`:''}
+          ${(()=>{const pr=algo.isKnockout&&algo.penaltyRisk;if(!pr)return '';const v=typeof pr==='object'?(pr.home??pr.away):pr;return v!=null?`<div style="margin-top:6px;font-size:10px;color:var(--acc)">🎯 Penalty history: <strong>${v}%</strong> shootout win rate (knockout)</div>`:''})()}
+        </div>
+
+        ${algo.depth!=null?`<div class="td-chart" style="margin:0">
+          <div class="td-chart-title">👥 Squad Depth Score</div>
+          <div style="font-size:26px;font-weight:800;color:var(--dim);margin:4px 0">${algo.depth.toFixed(1)}</div>
+          ${bar(Math.min(100,Math.round(algo.depth/12*100)),'var(--dim)')}
+          <div style="font-size:9px;color:var(--mut);margin-top:5px">Weighted by roster size, avg appearances & positional coverage</div>
+        </div>`:''}
+
+      </div>`;
+    })()}
     <div class="td-section">Formation & Analytics</div>
     <div class="td-viz">
       <div class="td-pitch-wrap">
@@ -1628,8 +1780,10 @@ function renderTeamDetail(){
 let algoOverride = null;
 
 async function goToAlgo(home, away, lH, lA, finalHome, finalDraw, finalAway, suspHome=0, suspAway=0, xgSource='proxy') {
+  // Look up extra contextual factors stored by the game-card renderer
+  const extraFactors = (window._gameFactorsMap || {})[`${home}|${away}`] || null;
   // Store the exact λ and blended probs from the prediction card
-  algoOverride = (lH && lA) ? { lH, lA, finalHome, finalDraw, finalAway, home, away, suspHome, suspAway, xgSource } : null;
+  algoOverride = (lH && lA) ? { lH, lA, finalHome, finalDraw, finalAway, home, away, suspHome, suspAway, xgSource, extraFactors } : null;
 
   // Switch to Algorithm tab
   const btn = [...document.querySelectorAll('.fb')].find(b => b.textContent.includes('Algorithm'));
