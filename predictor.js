@@ -30,6 +30,41 @@ const FIFA_RANKINGS = {
   "Congo DR":49,
 };
 
+// Style index: +2 = very attacking, -2 = very defensive (±3% per point on λ)
+const MANAGER_STYLE = {
+  "france":1.3,"brazil":1.5,"england":0.8,"portugal":1.1,"spain":1.6,
+  "argentina":0.5,"belgium":0.6,"netherlands":1.2,"germany":1.0,
+  "morocco":-1.0,"usa":0.2,"croatia":-0.5,"colombia":0.5,"norway":0.6,
+  "mexico":0.2,"japan":0.4,"senegal":0.0,"uruguay":-1.5,"switzerland":-0.5,
+  "australia":0.0,"egypt":-0.8,"ecuador":0.0,"austria":0.8,"denmark":-0.2,
+  "sweden":0.5,"canada":0.3,"iran":-1.5,"algeria":0.7,"ghana":0.0,
+  "saudiarabia":-0.8,"ivorycoast":0.5,"southafrica":-0.3,"panama":-0.8,
+  "jordan":-0.5,"uzbekistan":0.0,"bosniaandherzegovina":0.3,
+  "congord":-0.3,"drcongo":-0.3,
+};
+
+// Penalty shootout record: { taken, won } — for knockout draw risk display
+const PENALTY_HISTORY = {
+  "england":    { taken:8, won:3 },
+  "france":     { taken:6, won:4 },
+  "argentina":  { taken:8, won:6 },
+  "germany":    { taken:9, won:7 },
+  "portugal":   { taken:5, won:3 },
+  "brazil":     { taken:8, won:5 },
+  "spain":      { taken:6, won:3 },
+  "italy":      { taken:7, won:4 },
+  "netherlands":{ taken:6, won:3 },
+  "croatia":    { taken:5, won:4 },
+  "uruguay":    { taken:4, won:3 },
+  "colombia":   { taken:3, won:2 },
+  "usa":        { taken:3, won:1 },
+  "morocco":    { taken:3, won:2 },
+  "japan":      { taken:4, won:2 },
+  "switzerland":{ taken:4, won:2 },
+  "sweden":     { taken:3, won:1 },
+  "denmark":    { taken:3, won:2 },
+};
+
 // WC 2022 group stage — used as historical prior (0.25× recency weight)
 const WC2022_RESULTS = [
   // Group A
@@ -298,7 +333,8 @@ function buildModel(liveResults) {
 
   const teamObs = {};
 
-  const addResults = (results, recencyScale) => {
+  const addResults = (results, recencyScale, boostRecent = false) => {
+    const teamGamesSeen = {};
     for (let i = results.length - 1; i >= 0; i--) {
       const r = results[i];
       for (const [nn, xgFor, xgAgainst] of [
@@ -306,13 +342,15 @@ function buildModel(liveResults) {
         [normName(r.away), r.axg, r.hxg],
       ]) {
         if (!teamObs[nn]) teamObs[nn] = [];
-        teamObs[nn].push({ xgFor, xgAgainst, recencyScale });
+        teamGamesSeen[nn] = (teamGamesSeen[nn] || 0) + 1;
+        const recentBoost = boostRecent && teamGamesSeen[nn] <= 3 ? 2.0 : 1.0;
+        teamObs[nn].push({ xgFor, xgAgainst, recencyScale: recencyScale * recentBoost });
       }
     }
   };
 
-  addResults(allResults, 1.0);      // current tournament (incl. injected) — full weight
-  addResults(WC2022_RESULTS, 0.25); // 2022 history — 25% recency weight
+  addResults(allResults, 1.0, true);      // boost last 3
+  addResults(WC2022_RESULTS, 0.25, false); // 2022 history — 25% recency weight
 
   const DECAY = 0.62;
 
@@ -342,6 +380,18 @@ function buildModel(liveResults) {
 
     s.attack  = obsW * obsAttack  + (1 - obsW) * s.priorAttack;
     s.defense = obsW * obsDefense + (1 - obsW) * s.priorDefense;
+
+    // Goals conceded trend: worsening defense → λ for opponents increases
+    if (sorted.length >= 4) {
+      const recent3Conceded = sorted.slice(0, 3).map(o => o.xgAgainst);
+      const olderConceded   = sorted.slice(3).map(o => o.xgAgainst);
+      const recentAvg = recent3Conceded.reduce((a, v) => a + v, 0) / 3;
+      const olderAvg  = olderConceded.reduce((a, v) => a + v, 0) / olderConceded.length;
+      if (olderAvg > 0) {
+        const trend = (recentAvg - olderAvg) / olderAvg;
+        s.defense *= 1 + Math.max(-0.12, Math.min(0.12, trend * 0.4));
+      }
+    }
   }
 
   return { leagueAvgXg, eloRatings, teamStrengths: strengths };
@@ -551,6 +601,38 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
   if (context.homeMustWin) lambdaH *= 1.06;
   if (context.awayMustWin) lambdaA *= 1.06;
 
+  // Manager style (attacking vs defensive tactical setup)
+  const styleH = MANAGER_STYLE[hn] ?? 0;
+  const styleA = MANAGER_STYLE[an] ?? 0;
+  lambdaH *= (1 + styleH * 0.03);
+  lambdaA *= (1 + styleA * 0.03);
+
+  // Knockout pressure: more conservative play, slightly lower scoring
+  if (context.isKnockout) {
+    lambdaH *= 0.94;
+    lambdaA *= 0.94;
+  }
+
+  // Fatigue from short rest (< 5 days between games)
+  if (context.homeRestDays != null && context.homeRestDays < 5) {
+    lambdaH *= (context.homeRestDays < 4 ? 0.93 : 0.96);
+  }
+  if (context.awayRestDays != null && context.awayRestDays < 5) {
+    lambdaA *= (context.awayRestDays < 4 ? 0.93 : 0.96);
+  }
+
+  // Squad age fatigue: older squads (avg > 28.5) tire in late-tournament games
+  if (context.homeAvgAge != null && context.homeAvgAge > 28.5 && context.homeGameNum > 3) {
+    lambdaH *= 1 - Math.min(0.06, (context.homeAvgAge - 28.5) * 0.015);
+  }
+  if (context.awayAvgAge != null && context.awayAvgAge > 28.5 && context.awayGameNum > 3) {
+    lambdaA *= 1 - Math.min(0.06, (context.awayAvgAge - 28.5) * 0.015);
+  }
+
+  // Yellow card caution: team with 4+ yellows plays more carefully
+  if ((context.homeYellows || 0) >= 4) lambdaH *= 0.97;
+  if ((context.awayYellows || 0) >= 4) lambdaA *= 0.97;
+
   // Clamp to realistic range
   lambdaH = Math.max(0.25, Math.min(5.5, lambdaH));
   lambdaA = Math.max(0.25, Math.min(5.5, lambdaA));
@@ -712,9 +794,17 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
         home: context.homeSuspensions || 0,
         away: context.awaySuspensions || 0,
       } : null,
+      penaltyRisk: context.isKnockout ? {
+        home: PENALTY_HISTORY[hn] ? Math.round(PENALTY_HISTORY[hn].won / PENALTY_HISTORY[hn].taken * 100) : null,
+        away: PENALTY_HISTORY[an] ? Math.round(PENALTY_HISTORY[an].won / PENALTY_HISTORY[an].taken * 100) : null,
+      } : null,
+      restDays: { home: context.homeRestDays ?? null, away: context.awayRestDays ?? null },
+      squadAge: { home: context.homeAvgAge ?? null, away: context.awayAvgAge ?? null },
+      yellowCards: { home: context.homeYellows ?? 0, away: context.awayYellows ?? 0 },
+      isKnockout: context.isKnockout ?? false,
     },
     homeForm, awayForm,
   };
 }
 
-module.exports = { predict, getTeamForm, normName, injectLiveResults, buildModel, FIFA_RANKINGS, TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs };
+module.exports = { predict, getTeamForm, normName, injectLiveResults, buildModel, FIFA_RANKINGS, TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs, MANAGER_STYLE, PENALTY_HISTORY };

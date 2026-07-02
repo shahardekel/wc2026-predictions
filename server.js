@@ -161,7 +161,7 @@ app.get("/api/odds", async (req, res) => {
     const games = buildGameList(oddsResult.games, espnMatches);
 
     // Enrich first — populates boxscoreCache with real shots data for finished games
-    const enriched = await enrichWithPredictions(games);
+    const enriched = await enrichWithPredictions(games, espnMatches);
 
     // Inject after enrichment so shots-based xG is used instead of goals proxy
     injectFromESPN(espnMatches);
@@ -212,8 +212,59 @@ function getTeamSuspensions(teamName, allGames) {
   return bc.redCards.filter(rc => rc.teamId === teamId).length;
 }
 
+function getTeamYellowCards(teamName, allGames) {
+  const finished = (allGames || []).filter(g =>
+    g.status === "finished" &&
+    (teamNamesMatch(g.home, teamName) || teamNamesMatch(g.away, teamName))
+  );
+  let total = 0;
+  for (const g of finished) {
+    const espnId = g.espnId || g.id;
+    if (!espnId || !boxscoreCache[espnId]) continue;
+    const bc = boxscoreCache[espnId];
+    const isHome = teamNamesMatch(g.home, teamName);
+    const teamId = isHome ? bc.homeTeamId : bc.awayTeamId;
+    if (!teamId || !bc.yellowCards?.length) continue;
+    total += bc.yellowCards.filter(yc => yc.teamId === teamId).length;
+  }
+  return total;
+}
+
+function getTeamRestDays(teamName, upcomingGame, espnMatches) {
+  const finished = (espnMatches || []).filter(m =>
+    m.status === "FINISHED" &&
+    (teamNamesMatch(m.homeTeam, teamName) || teamNamesMatch(m.awayTeam, teamName))
+  );
+  if (!finished.length) return null;
+  finished.sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate));
+  const lastGame = finished[0];
+  if (!lastGame?.utcDate || !upcomingGame?.commence) return null;
+  return Math.round((new Date(upcomingGame.commence) - new Date(lastGame.utcDate)) / 86400000);
+}
+
+function getTeamGameNum(teamName, allGames) {
+  return (allGames || []).filter(g =>
+    g.status === "finished" &&
+    (teamNamesMatch(g.home, teamName) || teamNamesMatch(g.away, teamName))
+  ).length;
+}
+
+async function getTeamAvgAge(espnTeamId) {
+  if (!espnTeamId) return null;
+  try {
+    const roster = await getTeamRoster(espnTeamId);
+    if (!roster?.players?.length) return null;
+    const now = new Date();
+    const ages = roster.players
+      .filter(p => p.dateOfBirth)
+      .map(p => (now - new Date(p.dateOfBirth)) / (365.25 * 24 * 3600 * 1000));
+    if (!ages.length) return null;
+    return +(ages.reduce((a, v) => a + v, 0) / ages.length).toFixed(1);
+  } catch(_) { return null; }
+}
+
 // ─── PREDICTIONS ENRICHMENT ───────────────────────────────────────────────
-async function enrichWithPredictions(games) {
+async function enrichWithPredictions(games, espnMatches = []) {
   const now = Date.now();
 
   return Promise.all(games.map(async g => {
@@ -240,6 +291,7 @@ async function enrichWithPredictions(games) {
             awayCorners: summary.awayCorners,
             awaySaves: summary.awaySaves,
             redCards: summary.redCards || [],
+            yellowCards: summary.yellowCards || [],
             homeTeamId: g.homeEspnTeamId,
             awayTeamId: g.awayEspnTeamId,
           };
@@ -274,6 +326,28 @@ async function enrichWithPredictions(games) {
       const awaySusp = getTeamSuspensions(g.away, games);
       if (homeSusp > 0) context.homeSuspensions = homeSusp;
       if (awaySusp > 0) context.awaySuspensions = awaySusp;
+
+      const homeYellows  = getTeamYellowCards(g.home, games);
+      const awayYellows  = getTeamYellowCards(g.away, games);
+      const homeRestDays = getTeamRestDays(g.home, g, espnMatches);
+      const awayRestDays = getTeamRestDays(g.away, g, espnMatches);
+      const homeGameNum  = getTeamGameNum(g.home, games);
+      const awayGameNum  = getTeamGameNum(g.away, games);
+      const [homeAvgAge, awayAvgAge] = await Promise.all([
+        getTeamAvgAge(g.homeEspnTeamId),
+        getTeamAvgAge(g.awayEspnTeamId),
+      ]);
+      const isKnockout = (homeGameNum >= 3 && awayGameNum >= 3); // past group stage
+
+      context.homeYellows  = homeYellows;
+      context.awayYellows  = awayYellows;
+      context.homeRestDays = homeRestDays;
+      context.awayRestDays = awayRestDays;
+      context.homeAvgAge   = homeAvgAge;
+      context.awayAvgAge   = awayAvgAge;
+      context.homeGameNum  = homeGameNum;
+      context.awayGameNum  = awayGameNum;
+      context.isKnockout   = isKnockout;
 
       const handicap  = summary?.spread    ?? g.handicap  ?? null;
       const totalLine = summary?.overUnder  ?? g.totalLine ?? null;
@@ -311,6 +385,9 @@ async function enrichWithPredictions(games) {
         homeSuspensions: homeSusp,
         awaySuspensions: awaySusp,
         xgSource,
+        yellowCards: { home: homeYellows, away: awayYellows },
+        restDays: { home: homeRestDays, away: awayRestDays },
+        isKnockout,
       } : undefined };
     } catch(e) {
       console.error(`Prediction error for ${g.home} vs ${g.away}:`, e.message);
@@ -476,6 +553,15 @@ async function getESPNSummary(espnId) {
         minute: e.clock?.displayValue || '',
       }));
 
+    // Yellow cards from keyEvents
+    const yellowCards = (d.keyEvents || [])
+      .filter(e => (e.type?.type === 'yellow-card' || e.type?.type === 'yellow card') && e.participants?.length)
+      .map(e => ({
+        player: e.participants[0].athlete.displayName,
+        teamId: e.team?.id || null,
+        minute: e.clock?.displayValue || '',
+      }));
+
     // ── Shots, possession, corners, saves stats from boxscore ──
     let homeShotsOnTarget = null, homeShots = null, awayShotsOnTarget = null, awayShots = null;
     let homePossession = null, awayPossession = null;
@@ -503,7 +589,7 @@ async function getESPNSummary(espnId) {
       }
     }
 
-    const result = { spread, overUnder, homeMLProb, awayMLProb, standings, last5, goalscorers, redCards,
+    const result = { spread, overUnder, homeMLProb, awayMLProb, standings, last5, goalscorers, redCards, yellowCards,
       homeShotsOnTarget, homeShots, homePossession, homeCorners, homeSaves,
       awayShotsOnTarget, awayShots, awayPossession, awayCorners, awaySaves };
     summaryCache[espnId] = { data: result, ts: now };
