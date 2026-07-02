@@ -653,6 +653,18 @@ function card(g){
     </div>`;
     const _suspH = f.suspensions?.home||0, _suspA = f.suspensions?.away||0;
     const _xgSrc = g.summary?.xgSource==='shots'?'shots':'proxy';
+    // Store extra factors in global map (avoids JSON-in-onclick quoting issues)
+    const _gameKey = `${g.home}|${g.away}`;
+    window._gameFactorsMap = window._gameFactorsMap || {};
+    window._gameFactorsMap[_gameKey] = {
+      yellowCards: f.yellowCards,
+      restDays: f.restDays,
+      isKnockout: f.isKnockout,
+      penaltyRisk: f.penaltyRisk,
+      managerStyle: f.managerStyle,
+      squadAge: f.squadAge,
+      attackDefense: f.attackDefense,
+    };
     factorHTML=`<div class="factors">
       <div class="factors-title" onclick="goToAlgo('${g.home.replace(/'/g,"\\'")}','${g.away.replace(/'/g,"\\'")}',${po.lambdaHome||'null'},${po.lambdaAway||'null'},${p.homeWinProb},${p.drawProb},${p.awayWinProb},${_suspH},${_suspA},'${_xgSrc}');return false" style="cursor:pointer" title="Open in Algorithm tab">🔬 Algorithm Breakdown${lcBadge} <span style="color:var(--mut);font-weight:400;font-size:9px;margin-left:4px">— Dixon-Coles Poisson + Bayesian Elo</span><span style="margin-left:auto;font-size:9px;color:var(--acc)">↗ open heatmap</span></div>
       ${poissonRow}
@@ -1203,6 +1215,7 @@ async function updateHeatmap(){
   const hmSuspHome = algoOverride?.suspHome || 0;
   const hmSuspAway = algoOverride?.suspAway || 0;
   const hmXgSource = algoOverride?.xgSource || 'proxy';
+  const hmExtra = algoOverride?.extraFactors || null;
 
   let html=`<div class="heatmap-info">
     <div class="hm-lambda">λ<sub>home</sub> = <b>${lH.toFixed(2)}</b> &nbsp;·&nbsp; λ<sub>away</sub> = <b>${lA.toFixed(2)}</b>${fromCard?` <span style="font-size:9px;color:var(--pur);margin-left:6px">exact predictor values</span>`:''}</div>
@@ -1218,6 +1231,17 @@ async function updateHeatmap(){
         hmSuspAway>0?`<span style="color:var(--red)">🟥 ${aLabel}: ${hmSuspAway} suspended</span>`:'',
       ].filter(Boolean).join(' · ')}</span>`:''}
     </div>
+    ${hmExtra ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bor);font-size:10px">
+      ${hmExtra.isKnockout ? `<span style="background:rgba(251,191,36,0.15);color:var(--gld);padding:2px 7px;border-radius:12px;border:1px solid rgba(251,191,36,0.3)">🏆 Knockout −6%λ</span>` : '<span style="background:var(--sur2);color:var(--mut);padding:2px 7px;border-radius:12px">Group stage</span>'}
+      ${(hmExtra.yellowCards?.home||0)>=4 ? `<span style="background:rgba(234,179,8,0.15);color:#ca8a04;padding:2px 7px;border-radius:12px;border:1px solid rgba(234,179,8,0.3)">🟨 ${hLabel} ${hmExtra.yellowCards.home} yellows −3%λ</span>` : ''}
+      ${(hmExtra.yellowCards?.away||0)>=4 ? `<span style="background:rgba(234,179,8,0.15);color:#ca8a04;padding:2px 7px;border-radius:12px;border:1px solid rgba(234,179,8,0.3)">🟨 ${aLabel} ${hmExtra.yellowCards.away} yellows −3%λ</span>` : ''}
+      ${(hmExtra.restDays?.home!=null&&hmExtra.restDays.home<5) ? `<span style="background:rgba(251,146,60,0.15);color:var(--org);padding:2px 7px;border-radius:12px;border:1px solid rgba(251,146,60,0.3)">😴 ${hLabel} ${hmExtra.restDays.home}d rest ${hmExtra.restDays.home<4?'−7%':'−4%'}λ</span>` : ''}
+      ${(hmExtra.restDays?.away!=null&&hmExtra.restDays.away<5) ? `<span style="background:rgba(251,146,60,0.15);color:var(--org);padding:2px 7px;border-radius:12px;border:1px solid rgba(251,146,60,0.3)">😴 ${aLabel} ${hmExtra.restDays.away}d rest ${hmExtra.restDays.away<4?'−7%':'−4%'}λ</span>` : ''}
+      ${(hmExtra.managerStyle?.home!=null&&Math.abs(hmExtra.managerStyle.home)>0.3) ? `<span style="background:var(--sur2);color:${hmExtra.managerStyle.home>0?'var(--grn)':'var(--acc)'};padding:2px 7px;border-radius:12px">${hLabel} style ${hmExtra.managerStyle.home>0?'⚡ attacking':'🛡 defensive'}</span>` : ''}
+      ${(hmExtra.managerStyle?.away!=null&&Math.abs(hmExtra.managerStyle.away)>0.3) ? `<span style="background:var(--sur2);color:${hmExtra.managerStyle.away>0?'var(--grn)':'var(--acc)'};padding:2px 7px;border-radius:12px">${aLabel} style ${hmExtra.managerStyle.away>0?'⚡ attacking':'🛡 defensive'}</span>` : ''}
+      ${(hmExtra.isKnockout&&hmExtra.penaltyRisk) ? `<span style="background:var(--sur2);color:var(--mut);padding:2px 7px;border-radius:12px">🥅 Penalties: ${hLabel} ${hmExtra.penaltyRisk.home??'?'}% · ${aLabel} ${hmExtra.penaltyRisk.away??'?'}%</span>` : ''}
+      ${(hmExtra.attackDefense?.homeGames!=null) ? `<span style="background:var(--sur2);color:var(--dim);padding:2px 7px;border-radius:12px">📊 Data: ${hmExtra.attackDefense.homeGames}/${hmExtra.attackDefense.awayGames} WC games</span>` : ''}
+    </div>` : ''}
   </div>
   <div class="heatmap-grid-wrap">
     <div class="hm-col-label">${aLabel} goals →</div>
@@ -1628,8 +1652,10 @@ function renderTeamDetail(){
 let algoOverride = null;
 
 async function goToAlgo(home, away, lH, lA, finalHome, finalDraw, finalAway, suspHome=0, suspAway=0, xgSource='proxy') {
+  // Look up extra contextual factors stored by the game-card renderer
+  const extraFactors = (window._gameFactorsMap || {})[`${home}|${away}`] || null;
   // Store the exact λ and blended probs from the prediction card
-  algoOverride = (lH && lA) ? { lH, lA, finalHome, finalDraw, finalAway, home, away, suspHome, suspAway, xgSource } : null;
+  algoOverride = (lH && lA) ? { lH, lA, finalHome, finalDraw, finalAway, home, away, suspHome, suspAway, xgSource, extraFactors } : null;
 
   // Switch to Algorithm tab
   const btn = [...document.querySelectorAll('.fb')].find(b => b.textContent.includes('Algorithm'));

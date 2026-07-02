@@ -287,7 +287,7 @@ function buildModel(liveResults) {
   const rawAvgXg = allResults.length
     ? allResults.reduce((s, r) => s + r.hxg + r.axg, 0) / (allResults.length * 2)
     : 1.38;
-  const leagueAvgXg = Math.max(1.38, rawAvgXg);
+  const leagueAvgXg = Math.max(1.50, rawAvgXg);
 
   // ── Elo ratings ──
   const eloRatings = {};
@@ -321,11 +321,11 @@ function buildModel(liveResults) {
     const rank  = lookupNorm(FIFA_RANKINGS, team) ?? 50;
     const depth = lookupNorm(SQUAD_DEPTH,   team) ?? 5;
 
-    const rankAtkFactor  = Math.pow(50 / rank, 0.30);
+    const rankAtkFactor  = Math.pow(50 / rank, 0.25);
     const depthAtkBoost  = Math.pow(depth / 5.5, 0.28);
     const priorAttack    = leagueAvgXg * rankAtkFactor * depthAtkBoost;
 
-    const rankDefFactor  = Math.pow(rank / 50, 0.18);
+    const rankDefFactor  = Math.pow(rank / 50, 0.14);
     const priorDefense   = leagueAvgXg * rankDefFactor;
 
     strengths[nn] = { priorAttack, priorDefense, games: 0, attack: priorAttack, defense: priorDefense };
@@ -333,13 +333,20 @@ function buildModel(liveResults) {
 
   const teamObs = {};
 
-  const addResults = (results, recencyScale, boostRecent = false) => {
+  const addResults = (results, recencyScale, boostRecent = false, blendGoals = false) => {
     const teamGamesSeen = {};
     for (let i = results.length - 1; i >= 0; i--) {
       const r = results[i];
+      // Fix 1: one-directional goals blend — boost xG when actual goals exceed it,
+      // but never penalise for missed chances (e.g. 0-0 with xG=1.8 stays at 1.8).
+      // This corrects the systematic underestimation from shots-based xG without
+      // making good defenses look weak just because their opponents got unlucky.
+      const blend = (xg, g) => Math.max(xg, 0.45 * xg + 0.55 * (g * 0.85 + 0.15));
+      const hxgEff = blendGoals && r.hg != null ? blend(r.hxg, r.hg) : r.hxg;
+      const axgEff = blendGoals && r.ag != null ? blend(r.axg, r.ag) : r.axg;
       for (const [nn, xgFor, xgAgainst] of [
-        [normName(r.home), r.hxg, r.axg],
-        [normName(r.away), r.axg, r.hxg],
+        [normName(r.home), hxgEff, axgEff],
+        [normName(r.away), axgEff, hxgEff],
       ]) {
         if (!teamObs[nn]) teamObs[nn] = [];
         teamGamesSeen[nn] = (teamGamesSeen[nn] || 0) + 1;
@@ -349,8 +356,8 @@ function buildModel(liveResults) {
     }
   };
 
-  addResults(allResults, 1.0, true);      // boost last 3
-  addResults(WC2022_RESULTS, 0.25, false); // 2022 history — 25% recency weight
+  addResults(allResults, 1.0, true, true);      // boost last 3, blend goals+xG
+  addResults(WC2022_RESULTS, 0.25, false, false); // 2022 history — xG only (no goals blend)
 
   const DECAY = 0.62;
 
@@ -376,7 +383,7 @@ function buildModel(liveResults) {
     const obsDefense = wtXgAgainst / totalW;
 
     const effectiveN = s.games + obs.filter(o => o.recencyScale < 1).length * 0.25;
-    const obsW = 1 - 1 / (1 + effectiveN * 0.70);
+    const obsW = 1 - 1 / (1 + effectiveN * 0.55);
 
     s.attack  = obsW * obsAttack  + (1 - obsW) * s.priorAttack;
     s.defense = obsW * obsDefense + (1 - obsW) * s.priorDefense;
@@ -392,9 +399,33 @@ function buildModel(liveResults) {
         s.defense *= 1 + Math.max(-0.12, Math.min(0.12, trend * 0.4));
       }
     }
+
+    // Clamp extremes after all adjustments: prevent single-game anomalies from dominating
+    s.defense = Math.min(s.defense, leagueAvgXg * 1.4);  // cap weakness — no team worse than 1.4× avg
+    s.defense = Math.max(s.defense, leagueAvgXg * 0.35); // floor — only prevent near-zero artifacts
+    s.attack  = Math.min(s.attack,  leagueAvgXg * 2.8);  // cap extreme attack outliers
   }
 
-  return { leagueAvgXg, eloRatings, teamStrengths: strengths };
+  // Fix 2: Tournament calibration factor.
+  // Compare what the model predicts vs actual goals scored across WC 2026 games.
+  // Ratio = actual_goals / model_predicted_goals → multiplied onto every λ at predict time.
+  let sumActual = 0, sumPredicted = 0;
+  const calibGames = allResults.slice(-Math.min(allResults.length, 40));
+  for (const r of calibGames) {
+    const hn = normName(r.home), an = normName(r.away);
+    const hS = strengths[hn], aS = strengths[an];
+    if (!hS || !aS || r.hg == null) continue;
+    const predH = (hS.attack * aS.defense) / leagueAvgXg * 1.08;
+    const predA = (aS.attack * hS.defense) / leagueAvgXg;
+    sumPredicted += predH + predA;
+    sumActual    += r.hg  + r.ag;
+  }
+  // Cap between 1.0 and 1.5 — never deflate, never over-inflate
+  const calibFactor = sumPredicted > 0
+    ? Math.min(1.5, Math.max(1.0, sumActual / sumPredicted))
+    : 1.0;
+
+  return { leagueAvgXg, eloRatings, teamStrengths: strengths, calibFactor };
 }
 
 // ─── MODULE-LEVEL MODEL STATE ────────────────────────────────────────────────
@@ -409,10 +440,11 @@ function buildModel(liveResults) {
 // (not via a destructured local copy) to see updates.
 
 const _initial = buildModel([]);
-let LEAGUE_AVG_XG = _initial.leagueAvgXg;
+let LEAGUE_AVG_XG  = _initial.leagueAvgXg;
+let CALIB_FACTOR   = _initial.calibFactor;
 
 // Mutable objects — mutated in-place by injectLiveResults
-const ELO_RATINGS   = _initial.eloRatings;
+const ELO_RATINGS    = _initial.eloRatings;
 const TEAM_STRENGTHS = _initial.teamStrengths;
 
 // Rebuild the model with live finished-game data injected from ESPN.
@@ -424,6 +456,8 @@ function injectLiveResults(liveResults) {
   // `predictor.LEAGUE_AVG_XG` (the live accessor pattern in server.js) see it.
   LEAGUE_AVG_XG = model.leagueAvgXg;
   module.exports.LEAGUE_AVG_XG = model.leagueAvgXg;
+  CALIB_FACTOR  = model.calibFactor;
+  module.exports.CALIB_FACTOR  = model.calibFactor;
 
   // Mutate ELO_RATINGS in-place so any reference to this object is updated.
   for (const k of Object.keys(ELO_RATINGS)) delete ELO_RATINGS[k];
@@ -582,7 +616,10 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
   let usedHandicap = handicap, usedTotal = totalLine;
   if (usedTotal !== null) {
     const currentTotal = lambdaH + lambdaA;
-    const scale = usedTotal / currentTotal;
+    // Blend 60% model / 40% market O/U — trust our Poisson more than before.
+    // Full scaling (old behaviour) suppressed all model improvements when O/U=2.5.
+    const blendedTotal = 0.60 * currentTotal + 0.40 * usedTotal;
+    const scale = blendedTotal / currentTotal;
     lambdaH *= scale;
     lambdaA *= scale;
   }
@@ -634,8 +671,15 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
   if ((context.awayYellows || 0) >= 4) lambdaA *= 0.97;
 
   // Clamp to realistic range
-  lambdaH = Math.max(0.25, Math.min(5.5, lambdaH));
-  lambdaA = Math.max(0.25, Math.min(5.5, lambdaA));
+  // Fix 2: apply tournament calibration — scale up to match actual WC 2026 scoring rate
+  // Only applied when no bookmaker O/U line is overriding the total (market already calibrated)
+  if (!totalLine) {
+    lambdaH *= CALIB_FACTOR;
+    lambdaA *= CALIB_FACTOR;
+  }
+
+  lambdaH = Math.max(0.25, Math.min(4.5, lambdaH));
+  lambdaA = Math.max(0.25, Math.min(4.5, lambdaA));
 
   // ── POISSON SCORE MATRIX ─────────────────────────────────────────────────
   const poisson = poissonMatchProbs(lambdaH, lambdaA);
@@ -802,9 +846,10 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
       squadAge: { home: context.homeAvgAge ?? null, away: context.awayAvgAge ?? null },
       yellowCards: { home: context.homeYellows ?? 0, away: context.awayYellows ?? 0 },
       isKnockout: context.isKnockout ?? false,
+      managerStyle: { home: styleH, away: styleA },
     },
     homeForm, awayForm,
   };
 }
 
-module.exports = { predict, getTeamForm, normName, injectLiveResults, buildModel, FIFA_RANKINGS, TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs, MANAGER_STYLE, PENALTY_HISTORY };
+module.exports = { predict, getTeamForm, normName, injectLiveResults, buildModel, FIFA_RANKINGS, TEAM_STRENGTHS, ELO_RATINGS, LEAGUE_AVG_XG, CALIB_FACTOR, WC2022_RESULTS, WC_RESULTS, SQUAD_DEPTH, fetchWeather, weatherImpact, poissonMatchProbs, MANAGER_STYLE, PENALTY_HISTORY };
