@@ -12,7 +12,7 @@ function ELO_RATINGS_live()   { return predictor.ELO_RATINGS; }
 function LEAGUE_AVG_XG_live() { return predictor.LEAGUE_AVG_XG; }
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
