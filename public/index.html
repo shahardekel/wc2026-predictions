@@ -537,6 +537,8 @@ async function load(manual=false){
     dot.className=src==='live'?'dot ok':'dot';
     st.textContent=src==='live'?'Live data':src==='error'?'ESPN data (no odds)':'ESPN data';
     if(j.quota){const q=document.getElementById('quota');q.style.display='block';q.textContent=`API: ${j.quota.used} used · ${j.quota.remaining} left`;}
+    const ofa=document.getElementById('odds-fetched-at');
+    if(ofa){if(j.oddsFetchedAt){const ago=Math.round((Date.now()-j.oddsFetchedAt)/60000);const agoStr=ago<60?`${ago}m ago`:ago<1440?`${Math.round(ago/60)}h ago`:`${Math.round(ago/1440)}d ago`;ofa.style.display='block';ofa.textContent=`🕐 Odds fetched ${agoStr}`;}else{ofa.style.display='none';}}
     const fetchedEl=document.getElementById('odds-fetched-at');
     if(fetchedEl){
       if(j.oddsFetchedAt){
