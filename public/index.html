@@ -433,6 +433,7 @@
     <button class="fb" onclick="setF('teams',this)">👥 Teams</button>
     <button class="fb" onclick="setF('algo',this)">📐 Algorithm</button>
     <div class="quota" id="quota" style="display:none"></div>
+    <div class="quota" id="odds-fetched-at" style="display:none;color:var(--mut)"></div>
     <div class="quota" id="quota-tip" style="display:none;color:var(--gld);border-color:rgba(251,191,36,0.3)">📅 Odds refresh July 1 — hit Refresh</div>
   </div>
   <div id="gc"><div class="state"><div class="ic">⚽</div><h3>Loading predictions…</h3></div></div>
@@ -536,6 +537,15 @@ async function load(manual=false){
     dot.className=src==='live'?'dot ok':'dot';
     st.textContent=src==='live'?'Live data':src==='error'?'ESPN data (no odds)':'ESPN data';
     if(j.quota){const q=document.getElementById('quota');q.style.display='block';q.textContent=`API: ${j.quota.used} used · ${j.quota.remaining} left`;}
+    const fetchedEl=document.getElementById('odds-fetched-at');
+    if(fetchedEl){
+      if(j.oddsFetchedAt){
+        const diff=Date.now()-j.oddsFetchedAt;
+        const mins=Math.floor(diff/60000),hrs=Math.floor(mins/60);
+        const ago=hrs>0?`${hrs}h ${mins%60}m ago`:mins>0?`${mins}m ago`:'just now';
+        fetchedEl.textContent=`Odds fetched: ${ago}`;fetchedEl.style.display='block';
+      }else{fetchedEl.style.display='none';}
+    }
     const tip=document.getElementById('quota-tip');
     const hasOdds=games.some(g=>g.bookmakerCount>0);
     if(tip) tip.style.display=hasOdds?'none':'block';

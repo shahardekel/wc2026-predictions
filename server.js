@@ -174,6 +174,7 @@ app.get("/api/odds", async (req, res) => {
       games: enriched,
       quota: oddsResult.quota,
       scoresSource: espnMatches.length ? "espn" : "none",
+      oddsFetchedAt: oddsCache.ts || null,
     });
   } catch(err) {
     console.error("API Error:", err.message, err.stack);
