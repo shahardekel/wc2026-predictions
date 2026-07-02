@@ -247,9 +247,12 @@ function buildModel(liveResults) {
   const allResults = [...WC_RESULTS, ...extra];
 
   // ── League-wide average xG ──
-  const leagueAvgXg = allResults.length
+  // WC 2026 is averaging 2.855 goals/game (1.43 per team). Floor at 1.38 so the
+  // model never predicts below the tournament's observed scoring rate.
+  const rawAvgXg = allResults.length
     ? allResults.reduce((s, r) => s + r.hxg + r.axg, 0) / (allResults.length * 2)
-    : 1.35;
+    : 1.38;
+  const leagueAvgXg = Math.max(1.38, rawAvgXg);
 
   // ── Elo ratings ──
   const eloRatings = {};
