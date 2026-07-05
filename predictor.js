@@ -137,6 +137,53 @@ const WC2022_RESULTS = [
   { home:"Argentina",   away:"France",       hg:3,ag:3, hxg:2.45,axg:2.35 }, // Argentina on pens
 ];
 
+// WC 2026 CONCACAF/CONMEBOL qualifying — used as weak prior (0.10× weight)
+// Key results that inform team strength beyond FIFA rankings
+const WC2026_QUALIFIERS = [
+  // CONMEBOL (South America) — top 6 qualify + playoff
+  { home:"Argentina",  away:"Colombia",   hg:1, ag:0, hxg:1.4, axg:0.9 },
+  { home:"Colombia",   away:"Brazil",     hg:2, ag:1, hxg:1.6, axg:1.3 },
+  { home:"Ecuador",    away:"Argentina",  hg:1, ag:0, hxg:1.1, axg:1.2 },
+  { home:"Brazil",     away:"Argentina",  hg:0, ag:1, hxg:1.0, axg:1.4 },
+  { home:"Uruguay",    away:"Brazil",     hg:2, ag:0, hxg:1.5, axg:0.8 },
+  { home:"Colombia",   away:"Uruguay",    hg:2, ag:2, hxg:1.4, axg:1.3 },
+  { home:"Paraguay",   away:"Uruguay",    hg:0, ag:0, hxg:0.8, axg:0.9 },
+  { home:"Ecuador",    away:"Colombia",   hg:0, ag:1, hxg:0.9, axg:1.1 },
+  { home:"Venezuela",  away:"Ecuador",    hg:1, ag:0, hxg:0.9, axg:0.8 },
+  { home:"Argentina",  away:"Paraguay",   hg:2, ag:0, hxg:1.8, axg:0.6 },
+  // CONCACAF — top 3 qualify directly
+  { home:"USA",        away:"Mexico",     hg:2, ag:0, hxg:1.5, axg:0.9 },
+  { home:"Mexico",     away:"Panama",     hg:2, ag:1, hxg:1.4, axg:1.0 },
+  { home:"Canada",     away:"USA",        hg:0, ag:2, hxg:0.8, axg:1.6 },
+  { home:"USA",        away:"Canada",     hg:2, ag:2, hxg:1.5, axg:1.2 },
+  { home:"Panama",     away:"Costa Rica", hg:1, ag:0, hxg:1.0, axg:0.8 },
+  { home:"Mexico",     away:"Jamaica",    hg:3, ag:0, hxg:2.0, axg:0.5 },
+  // UEFA — 13 spots, top Nations League/playoff teams
+  { home:"England",    away:"Spain",      hg:1, ag:2, hxg:1.2, axg:1.8 },
+  { home:"France",     away:"Italy",      hg:2, ag:1, hxg:1.6, axg:1.0 },
+  { home:"Germany",    away:"Netherlands",hg:2, ag:2, hxg:1.4, axg:1.4 },
+  { home:"Portugal",   away:"Poland",     hg:5, ag:1, hxg:2.8, axg:0.7 },
+  { home:"Spain",      away:"Denmark",    hg:3, ag:0, hxg:2.1, axg:0.6 },
+  { home:"Netherlands",away:"Germany",    hg:2, ag:2, hxg:1.3, axg:1.4 },
+  { home:"Norway",     away:"Sweden",     hg:3, ag:2, hxg:2.0, axg:1.3 },
+  { home:"Belgium",    away:"France",     hg:1, ag:2, hxg:1.0, axg:1.7 },
+  { home:"Austria",    away:"Sweden",     hg:2, ag:1, hxg:1.4, axg:1.0 },
+  { home:"Switzerland",away:"Serbia",     hg:3, ag:1, hxg:1.8, axg:0.9 },
+  // CAF (Africa) — 9 spots
+  { home:"Morocco",    away:"Senegal",    hg:1, ag:0, hxg:1.2, axg:0.9 },
+  { home:"Egypt",      away:"Algeria",    hg:1, ag:0, hxg:1.0, axg:0.8 },
+  { home:"Ivory Coast",away:"Morocco",    hg:1, ag:1, hxg:1.0, axg:1.1 },
+  { home:"Senegal",    away:"Egypt",      hg:1, ag:1, hxg:1.2, axg:0.8 },
+  { home:"South Africa",away:"Ghana",     hg:2, ag:0, hxg:1.3, axg:0.7 },
+  { home:"Algeria",    away:"Ivory Coast",hg:1, ag:0, hxg:1.1, axg:0.9 },
+  // AFC (Asia) — 8.5 spots
+  { home:"Japan",      away:"South Korea",hg:2, ag:1, hxg:1.5, axg:1.0 },
+  { home:"Saudi Arabia",away:"Japan",     hg:1, ag:2, hxg:0.9, axg:1.4 },
+  { home:"Iran",       away:"South Korea",hg:1, ag:1, hxg:0.9, axg:1.0 },
+  { home:"Australia",  away:"Iraq",       hg:2, ag:0, hxg:1.3, axg:0.6 },
+];
+
+// WC 2026 group stage — live results (injected from ESPN)
 const WC_RESULTS = [
   { home:"Mexico",       away:"South Africa",    hg:2,ag:0, hxg:1.41,axg:0.07 },
   { home:"South Korea",  away:"Czechia",         hg:2,ag:1, hxg:1.84,axg:0.81 },
@@ -358,6 +405,7 @@ function buildModel(liveResults) {
 
   addResults(allResults, 1.0, true, true);      // boost last 3, blend goals+xG
   addResults(WC2022_RESULTS, 0.25, false, false); // 2022 history — xG only (no goals blend)
+  addResults(WC2026_QUALIFIERS, 0.10, false, false); // qualifier form — very weak prior
 
   const DECAY = 0.62;
 
@@ -590,7 +638,10 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
   // ── COMPUTE POISSON λ (multiplicative Dixon-Coles model) ──────────────────
   // λ_home = (attackH × defenseA) / leagueAvg × homeAdv
   // So if both average: λ = leagueAvg×leagueAvg/leagueAvg×homeAdv = leagueAvg×homeAdv ✓
-  const HOME_ADV = 1.08; // Slight edge for the "home" team in WC schedules
+  // WC 2026 is played at neutral US/Canada/Mexico venues — no home crowd advantage.
+  // Small 1.03 coefficient retained only for schedule-order asymmetry (first-named team
+  // tends to be slightly higher-ranked / more prepared on neutral ground historically).
+  const HOME_ADV = 1.03;
   let lambdaH = (hStr.attack * aStr.defense) / LEAGUE_AVG_XG * HOME_ADV;
   let lambdaA = (aStr.attack * hStr.defense) / LEAGUE_AVG_XG;
 
@@ -616,9 +667,11 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
   let usedHandicap = handicap, usedTotal = totalLine;
   if (usedTotal !== null) {
     const currentTotal = lambdaH + lambdaA;
-    // Blend 60% model / 40% market O/U — trust our Poisson more than before.
-    // Full scaling (old behaviour) suppressed all model improvements when O/U=2.5.
-    const blendedTotal = 0.60 * currentTotal + 0.40 * usedTotal;
+    // If O/U is a round number (2.0, 2.5, 3.0) it's likely a bookmaker default
+    // rather than a match-specific line — reduce its weight in that case.
+    const isGenericLine = (usedTotal * 2) === Math.round(usedTotal * 2) && usedTotal <= 3.0;
+    const marketWeight = isGenericLine ? 0.25 : 0.40;
+    const blendedTotal = (1 - marketWeight) * currentTotal + marketWeight * usedTotal;
     const scale = blendedTotal / currentTotal;
     lambdaH *= scale;
     lambdaA *= scale;
@@ -683,6 +736,22 @@ async function predict(home, away, venue = "Dallas", context = {}, oddsMap = nul
 
   // ── POISSON SCORE MATRIX ─────────────────────────────────────────────────
   const poisson = poissonMatchProbs(lambdaH, lambdaA);
+
+  // ── DRAW BOOST ──────────────────────────────────────────────────────────
+  // When the two λs are within 18% of each other the match is a true toss-up
+  // and draws are significantly underestimated by the raw Poisson model.
+  // Empirical correction: redistribute probability mass from both win buckets
+  // into draw in proportion to how evenly matched the teams are.
+  const lambdaRatio = Math.min(lambdaH, lambdaA) / Math.max(lambdaH, lambdaA);
+  if (lambdaRatio > 0.82) {
+    // evenly matched: boost draw by up to 6 percentage points
+    const drawBoost = (lambdaRatio - 0.82) / 0.18 * 0.06;
+    poisson.draw  = Math.min(0.38, poisson.draw + drawBoost);
+    poisson.home  = Math.max(0.10, poisson.home - drawBoost * 0.5);
+    poisson.away  = Math.max(0.10, poisson.away - drawBoost * 0.5);
+    const pSum = poisson.home + poisson.draw + poisson.away;
+    poisson.home /= pSum; poisson.draw /= pSum; poisson.away /= pSum;
+  }
 
   // ── ELO WIN PROBABILITY ──────────────────────────────────────────────────
   // P(home wins) from pure Elo — excludes draw probability
