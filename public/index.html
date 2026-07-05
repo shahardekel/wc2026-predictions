@@ -265,10 +265,19 @@
     .algo-sub{font-size:12px;color:var(--dim);margin:0 0 16px;line-height:1.6;}
     .algo-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
     @media(max-width:600px){.algo-cards{grid-template-columns:1fr;}}
-    .algo-card{background:var(--sur2);border:1px solid var(--bor);border-radius:12px;padding:16px;border-top-width:3px;}
+    .algo-card{background:var(--sur2);border:1px solid var(--bor);border-radius:12px;padding:16px;border-top-width:3px;cursor:default;transition:border-color .15s,transform .15s,box-shadow .15s;position:relative;}
+    .algo-card:hover{border-color:rgba(99,179,237,.5);transform:translateY(-2px);box-shadow:0 6px 24px rgba(0,0,0,.35);}
     .algo-card-pct{font-size:32px;font-weight:900;line-height:1;}
     .algo-card-name{font-size:13px;font-weight:700;color:var(--text);margin:6px 0 4px;}
     .algo-card-desc{font-size:11px;color:var(--dim);line-height:1.5;}
+    /* factor grid small cards */
+    .fcard{background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px;cursor:default;transition:border-color .15s,transform .15s,box-shadow .15s;position:relative;}
+    .fcard:hover{border-color:rgba(99,179,237,.45);transform:translateY(-2px);box-shadow:0 4px 18px rgba(0,0,0,.3);}
+    /* tooltip */
+    .tip-wrap{position:relative;display:contents;}
+    .tip-box{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid rgba(99,179,237,.4);color:#e2e8f0;font-size:11px;line-height:1.55;padding:10px 13px;border-radius:9px;width:240px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:999;white-space:normal;box-shadow:0 8px 28px rgba(0,0,0,.5);}
+    .tip-box::before{content:'';position:absolute;bottom:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-bottom-color:#1e293b;}
+    .fcard:hover .tip-box,.algo-card:hover .tip-box{opacity:1;}
 
     /* heatmap */
     .algo-heatmap-controls{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
@@ -963,63 +972,77 @@ function buildAlgoPage(d){
       <p class="algo-sub">A three-component probabilistic model trained on <strong>${d.wc2026Count}</strong> WC 2026 matches (live-updated), <strong>${d.wc2022Count}</strong> WC 2022 historical matches, and <strong>36 WC 2026 qualifying matches</strong> (0.10× prior). It produces a full score probability distribution, not just a single number.</p>
       <div class="algo-cards">
         <div class="algo-card" style="border-color:var(--grn)">
+          <div class="tip-box">The core engine. For each match, it estimates each team's expected goals (λ) from Bayesian attack/defense strengths, then builds a 10×10 grid of every possible scoreline (0-0 through 9-9). Scores are multiplied by a Dixon-Coles correction (ρ=−0.028) that slightly raises 0-0, 1-0, 0-1, 1-1 probabilities — low-scoring games happen more often than pure Poisson predicts.</div>
           <div class="algo-card-pct" style="color:var(--grn)">55%</div>
           <div class="algo-card-name">Dixon-Coles Poisson</div>
           <div class="algo-card-desc">Builds a full 10×10 score probability matrix using Bayesian team attack/defense parameters. Includes a low-score correlation correction (ρ=−0.028) for 0-0, 1-0, 0-1, 1-1.</div>
         </div>
         <div class="algo-card" style="border-color:var(--org)">
+          <div class="tip-box">Bookmaker odds from 40+ markets are de-vigged (margin removed) to get implied probabilities, then blended into the final result at 40% weight. For O/U totals, the blend weight drops to 25% when the line is a round number like 2.5 or 3.0 — those are often bookmaker defaults, not match-specific signals. When no odds are available the model runs on Poisson + Elo alone.</div>
           <div class="algo-card-pct" style="color:var(--org)">40%</div>
           <div class="algo-card-name">Market Odds</div>
           <div class="algo-card-desc">Bookmaker consensus probabilities (de-vigged) from 40+ bookmakers. The "wisdom of crowds" — markets aggregate massive information efficiently. O/U blend weight is 25% for generic lines (e.g. 2.5) and 40% for match-specific lines.</div>
         </div>
         <div class="algo-card" style="border-color:var(--pur)">
+          <div class="tip-box">Elo ratings start from FIFA rankings and update after every WC 2026 result using K=32 (high sensitivity). A 30-point home bonus is applied in Elo's win-expectancy formula. Elo acts as a sanity check: if Poisson and market agree but Elo strongly disagrees (e.g. a massive upset), it pulls the final probability slightly toward the underdog. Weight: 5% with market, 18% without.</div>
           <div class="algo-card-pct" style="color:var(--pur)">5%</div>
           <div class="algo-card-name">Bayesian Elo</div>
           <div class="algo-card-desc">Elo ratings initialised from FIFA rankings (K=32), updated live after each WC 2026 result. Used as a calibration cross-check.</div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">Shots on target are the strongest predictor of goals. The formula: SoT×0.30 + off-target shots×0.04 + corners×0.04 + (possession%−50%)×0.005. When ESPN boxscore data isn't available yet (e.g. pre-match), it falls back to goals×0.85+0.15 as a conservative xG estimate.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Shots-based xG</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">SoT×0.30 + off-target×0.04 + corners×0.04 + (poss−50%)×0.005. Live ESPN boxscore, falls back to goals proxy.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">The Bayesian model weights recent games more heavily. A team's last 3 WC matches count at 2× the normal weight, so a hot streak (e.g. 3 goals/game) rapidly raises their attack parameter and shifts the prediction before the next match.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">⚡ Recent form weight</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">Each team's last 3 WC games carry 2× weight in the Bayesian update — hot or cold streaks shift predictions immediately.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">If a team's average xG conceded in their last 3 games is worse than their overall tournament average, their defensive parameter is penalised — opponents get up to a +12% boost to their expected goals against that team. Catches teams whose defense is visibly leaking.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📉 Goals conceded trend</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">If a team's last 3 xG conceded > earlier average, their defense parameter is penalised up to +12% for opponents.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">Each manager is scored on a −2 to +2 attacking style scale based on tactical tendencies. Attacking managers (Spain +1.6, Brazil +1.5, France +1.0) boost λ by ±3% per point. Defensive setups (Uruguay −1.5, Iran −1.5, Saudi Arabia −1.2) reduce it. A +1.6 vs −1.5 matchup can shift expected goals by ~9%.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🎭 Manager style index</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">Attacking managers (Spain +1.6, Brazil +1.5) boost λ. Defensive setups (Uruguay −1.5, Iran −1.5) reduce it. ±3% per style point.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">Calculated automatically from ESPN fixture dates. Less than 4 rest days since the last game: λ×0.93 (7% goal drop). 4–5 days: λ×0.96. 6+ days: no penalty. Both teams' fatigue is computed independently, so a rested team vs a fatigued one can see a significant λ gap.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">😴 Rest days fatigue</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">&lt;4 days since last game → λ×0.93. 4–5 days → λ×0.96. Calculated from ESPN fixture dates automatically.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">Squads with an average age above 28.5 years face increasing fatigue as the tournament progresses. From game 4 onwards, older squads receive a λ penalty scaling up to 6% — reflecting that veteran-heavy sides tire more noticeably in deep tournament runs (e.g. group stage → knockouts).</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">👴 Squad age fatigue</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">Older squads (avg age &gt;28.5) in game 4+ face up to 6% λ penalty as tournament length takes its toll.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">Players on 4+ yellow cards are one booking from suspension and play more carefully. The model applies λ×0.97 to their team's attack — a small but real effect. This is tracked per-team from ESPN disciplinary data and updated after each match.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🟨 Yellow card caution</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">4+ accumulated yellows → λ×0.97. Players on yellow play more conservatively to avoid suspension.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">Once the group stage is over, both teams' λ values are scaled by ×0.94. Knockout football is demonstrably more defensive — teams prioritise not conceding over scoring. This lowers expected goals for both sides and implicitly raises draw probability since fewer goals are expected overall.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🏆 Knockout pressure</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">Post-group-stage games: λ×0.94 for both teams. Knockout football is more cautious — lower scoring, higher draw probability.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">When a knockout match ends in a draw and goes to penalties, historical shootout win rates are shown in the breakdown. England win ~38% of shootouts; France ~67%; Germany ~67%; Argentina ~70%. These rates inform how much a high draw probability matters in elimination rounds.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🥅 Penalty history</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">Historical shootout win rates shown in knockout game breakdowns. England 38% vs France 67% — relevant when draw probability is high.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">The Poisson model systematically underestimates draws because it treats home and away goals as independent. When λH and λA are within 18% of each other (evenly matched teams), up to +6 percentage points are redistributed from the two win buckets into the draw bucket, then the three probabilities are renormalized. Addresses the model's historic 0% draw accuracy.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🤝 Draw probability boost</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">When both teams' expected goals are within 18% of each other, draw probability gets up to +6pp redistributed from win buckets. Fixes systematic draw underestimation.</div>
         </div>
-        <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px">
+        <div class="fcard">
+          <div class="tip-box">WC 2026 has no true home team — all matches are at neutral venues in the USA, Canada, and Mexico. The home advantage multiplier was reduced from ×1.08 (typical club football) to ×1.03. The tiny residual reflects that the "home" team in the fixture listing tends to be slightly higher-ranked — a scheduling artefact, not a crowd effect.</div>
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">🌐 Neutral venue correction</div>
           <div style="font-size:11px;color:var(--dim);line-height:1.5">WC 2026 is played at neutral US/Canada/Mexico venues. Home advantage reduced from ×1.08 to ×1.03 — only a minor scheduling asymmetry remains, not a crowd effect.</div>
         </div>
