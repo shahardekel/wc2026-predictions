@@ -41,7 +41,15 @@ const VENUES = {
   "Jordan-Argentina":"Dallas",
 };
 
-const ODDS_CACHE_FILE = path.join(__dirname, ".odds-cache.json");
+const ODDS_CACHE_FILE  = path.join(__dirname, ".odds-cache.json");
+const PRED_ARCHIVE_FILE = path.join(__dirname, ".pred-archive.json");
+function loadPredArchive() {
+  try { return JSON.parse(fs.readFileSync(PRED_ARCHIVE_FILE, "utf8")) || {}; } catch(_) { return {}; }
+}
+function savePredArchive() {
+  try { fs.writeFileSync(PRED_ARCHIVE_FILE, JSON.stringify(predArchive)); } catch(_) {}
+}
+let predArchive = loadPredArchive(); // key: "home-away" → prediction snapshot (never expires)
 function loadOddsCacheFromDisk() {
   try {
     const raw = fs.readFileSync(ODDS_CACHE_FILE, "utf8");
@@ -282,12 +290,23 @@ async function enrichWithPredictions(games, espnMatches = []) {
 
     // For finished games, fetch summary for goalscorers + store shots/red cards in boxscoreCache
     if (g.status === "finished") {
-      if (!g.espnId && !g.id) return g;
+      // Always attach pre-match prediction for accuracy tracking
+      const cacheKey = `${normName(g.home)}-${normName(g.away)}`;
+      let pred = predArchive[cacheKey] || predCache[cacheKey]?.data || null;
+      if (!pred) {
+        try {
+          const venue = VENUES[`${g.home}-${g.away}`] || VENUES[`${g.away}-${g.home}`] || "Dallas";
+          pred = await predict(g.home, g.away, venue, {}, g.odds || {}, null, null, null);
+          predArchive[cacheKey] = pred;
+          savePredArchive();
+        } catch(_) {}
+      }
+
+      if (!g.espnId && !g.id) return { ...g, prediction: pred };
       try {
         const espnId = g.espnId || g.id;
         const summary = await getESPNSummary(espnId);
-        if (!summary) return g;
-        // Populate boxscoreCache with shots + red card data for this finished game
+        if (!summary) return { ...g, prediction: pred };
         if (espnId && !boxscoreCache[espnId]) {
           boxscoreCache[espnId] = {
             homeShotsOnTarget: summary.homeShotsOnTarget,
@@ -306,14 +325,13 @@ async function enrichWithPredictions(games, espnMatches = []) {
             awayTeamId: g.awayEspnTeamId,
           };
         }
-        if (!summary.goalscorers?.length && !summary.redCards?.length) return g;
         const homeId = g.homeEspnTeamId, awayId = g.awayEspnTeamId;
         const homeScorers = (summary.goalscorers || []).filter(s => s.teamId === homeId);
         const awayScorers = (summary.goalscorers || []).filter(s => s.teamId === awayId);
         const homeRedCards = (summary.redCards || []).filter(s => s.teamId === homeId);
         const awayRedCards = (summary.redCards || []).filter(s => s.teamId === awayId);
-        return { ...g, summary: { homeScorers, awayScorers, homeRedCards, awayRedCards } };
-      } catch(_) { return g; }
+        return { ...g, prediction: pred, summary: { homeScorers, awayScorers, homeRedCards, awayRedCards } };
+      } catch(_) { return { ...g, prediction: pred }; }
     }
 
     const cacheKey = `${normName(g.home)}-${normName(g.away)}`;
@@ -382,6 +400,8 @@ async function enrichWithPredictions(games, espnMatches = []) {
 
       const pred = await predict(g.home, g.away, venue, context, g.odds || {}, handicap, totalLine, playerStats);
       predCache[cacheKey] = { data: pred, ts: now };
+      // Persist to archive so finished games can show accuracy data
+      if (!predArchive[cacheKey]) { predArchive[cacheKey] = pred; savePredArchive(); }
       // Determine xG source for this game
       const espnId = g.espnId || g.id;
       const bc = espnId ? boxscoreCache[espnId] : null;

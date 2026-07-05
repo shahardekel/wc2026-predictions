@@ -858,9 +858,105 @@ async function renderAlgo(){
   }
 }
 
+function calcAccuracy() {
+  const finished = games.filter(g => g.status === 'finished' && g.prediction && g.homeScore != null && g.awayScore != null);
+  if (!finished.length) return null;
+  const outcome = (h, a) => h > a ? 'H' : h < a ? 'A' : 'D';
+  const maxP = (hw, d, aw) => hw >= d && hw >= aw ? 'H' : aw >= d && aw >= hw ? 'A' : 'D';
+  let correct = 0, exact = 0, hCorrect = 0, dCorrect = 0, aCorrect = 0;
+  let hActual = 0, dActual = 0, aActual = 0, hPred = 0, dPred = 0, aPred = 0;
+  let totalGoals = 0, totalPredGoals = 0;
+  const upsets = [];
+  finished.forEach(g => {
+    const ah = g.homeScore, aa = g.awayScore;
+    const p = g.prediction;
+    const ph = p.predictedHome, pa = p.predictedAway;
+    const hw = p.homeWinProb||0, dw = p.drawProb||0, aw = p.awayWinProb||0;
+    const act = outcome(ah, aa), pred = maxP(hw, dw, aw);
+    if (act === 'H') hActual++; else if (act === 'D') dActual++; else aActual++;
+    if (pred === 'H') hPred++; else if (pred === 'D') dPred++; else aPred++;
+    if (act === pred) { correct++; if (act==='H') hCorrect++; else if(act==='D') dCorrect++; else aCorrect++; }
+    if (ph === ah && pa === aa) exact++;
+    totalGoals += ah + aa;
+    totalPredGoals += ph + pa;
+    if (act !== pred && ((pred==='H'&&act==='A')||(pred==='A'&&act==='H'))) {
+      upsets.push(`${g.homeFlag||''}${g.home} ${ah}–${aa} ${g.away}${g.awayFlag||''}`);
+    }
+  });
+  const n = finished.length;
+  return { n, correct, exact, hActual, dActual, aActual, hPred, dPred, aPred,
+    hCorrect, dCorrect, aCorrect, upsets,
+    avgGoals: (totalGoals/n).toFixed(2), avgPredGoals: (totalPredGoals/n).toFixed(2) };
+}
+
 function buildAlgoPage(d){
+  const acc = calcAccuracy();
+  const pct = v => Math.round(v * 100);
+  const bar = (val, max, color) => `<div style="height:8px;border-radius:4px;background:var(--bor);overflow:hidden;margin-top:5px"><div style="height:100%;width:${Math.min(100,Math.round(val/max*100))}%;background:${color};border-radius:4px;transition:width .5s"></div></div>`;
+
+  const accuracySection = acc ? `
+    <div class="algo-section" style="border-color:rgba(59,130,246,.3);background:linear-gradient(135deg,rgba(59,130,246,.05),var(--sur))">
+      <h2 class="algo-h2">📊 Live prediction accuracy</h2>
+      <p class="algo-sub">Measured against <strong>${acc.n} finished WC 2026 matches</strong>. Updates automatically as games complete.</p>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:16px 0">
+        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:var(--acc)">${pct(acc.correct/acc.n)}%</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:2px">CORRECT OUTCOME</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px">${acc.correct}/${acc.n} matches</div>
+          ${bar(acc.correct, acc.n, 'var(--acc)')}
+          <div style="font-size:9px;color:var(--mut);margin-top:4px">Baseline (random): 33%</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:var(--grn)">${pct(acc.exact/acc.n)}%</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:2px">EXACT SCORE</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px">${acc.exact}/${acc.n} matches</div>
+          ${bar(acc.exact, acc.n, 'var(--grn)')}
+          <div style="font-size:9px;color:var(--mut);margin-top:4px">Industry avg: ~8%</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:var(--org)">${acc.avgGoals}</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:2px">AVG GOALS / GAME</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px">Predicted: ${acc.avgPredGoals}</div>
+          ${bar(parseFloat(acc.avgGoals), 5, 'var(--org)')}
+          <div style="font-size:9px;color:var(--mut);margin-top:4px">WC 2026 actual rate</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:${acc.dCorrect===0?'var(--red)':'var(--gld)'}">${acc.dActual>0?pct(acc.dCorrect/acc.dActual):0}%</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:2px">DRAW ACCURACY</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px">${acc.dCorrect}/${acc.dActual} draws</div>
+          ${bar(acc.dCorrect, Math.max(acc.dActual,1), 'var(--gld)')}
+          <div style="font-size:9px;color:var(--red);margin-top:4px">⚠️ Known weakness</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:4px">
+        ${[
+          ['🏠 Home wins', acc.hCorrect, acc.hActual, acc.hPred, 'var(--grn)'],
+          ['🤝 Draws',     acc.dCorrect, acc.dActual, acc.dPred, 'var(--gld)'],
+          ['✈️ Away wins', acc.aCorrect, acc.aActual, acc.aPred, 'var(--acc)'],
+        ].map(([label, correct, actual, pred, color]) => `
+          <div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+            <div style="font-size:10px;color:var(--mut);margin-bottom:6px">${label}</div>
+            <div style="font-size:18px;font-weight:800;color:${color}">${actual>0?pct(correct/actual):0}%</div>
+            <div style="font-size:9px;color:var(--mut);margin-top:3px">${correct}/${actual} correct · predicted ${pred}</div>
+            ${bar(correct, Math.max(actual,1), color)}
+          </div>
+        `).join('')}
+      </div>
+
+      ${acc.upsets.length ? `
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bor)">
+        <div style="font-size:10px;color:var(--mut);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">⚡ Biggest misses (predicted wrong direction)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${acc.upsets.map(u => `<span style="font-size:10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:var(--red);border-radius:6px;padding:3px 8px">${u}</span>`).join('')}
+        </div>
+      </div>` : ''}
+    </div>` : '';
+
   return `
   <div class="algo-page">
+    ${accuracySection}
     <!-- ── OVERVIEW ── -->
     <div class="algo-section">
       <h2 class="algo-h2">How the prediction engine works</h2>
