@@ -449,8 +449,6 @@
   <div id="gc"><div class="state"><div class="ic">⚽</div><h3>Loading predictions…</h3></div></div>
 </main>
 </div>
-<!-- Global algo tooltip -->
-<div id="atip" style="position:fixed;z-index:9999;background:#1e293b;border:1px solid rgba(99,179,237,.45);color:#e2e8f0;font-size:11px;line-height:1.6;padding:11px 14px;border-radius:10px;width:260px;pointer-events:none;opacity:0;transition:opacity .15s;box-shadow:0 8px 32px rgba(0,0,0,.6);white-space:normal;display:none"></div>
 
 <script>
 let games=[], filter='soon', cdVal=60;
@@ -865,8 +863,15 @@ async function renderAlgo(){
     algoData = await fetch('/api/algo-data').then(r => r.json());
     gc.innerHTML = buildAlgoPage(algoData);
     initAlgoCharts(algoData);
-    // Wire up tooltips via global fixed tooltip (avoids overflow/z-index clipping)
-    const atip = document.getElementById('atip');
+    // Wire up tooltips via global fixed tooltip appended to body
+    // (position:fixed breaks inside transformed ancestors — body-level avoids this)
+    let atip = document.getElementById('atip');
+    if (!atip) {
+      atip = document.createElement('div');
+      atip.id = 'atip';
+      atip.style.cssText = 'position:fixed;z-index:2147483647;background:#1e293b;border:1px solid rgba(99,179,237,.45);color:#e2e8f0;font-size:11px;line-height:1.6;padding:11px 14px;border-radius:10px;width:260px;pointer-events:none;opacity:0;transition:opacity .12s;box-shadow:0 8px 32px rgba(0,0,0,.7);white-space:normal;display:none';
+      document.body.appendChild(atip);
+    }
     function showATip(e, text) {
       atip.textContent = text;
       atip.style.display = 'block';
@@ -874,9 +879,11 @@ async function renderAlgo(){
       atip.style.opacity = '1';
     }
     function positionATip(e) {
-      const pad = 14, w = 260, h = atip.offsetHeight;
+      const pad = 14, w = 260;
+      // offsetHeight can be 0 before first paint — use 130px as safe fallback
+      const h = atip.offsetHeight || 130;
       let x = e.clientX + pad, y = e.clientY + pad;
-      if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+      if (x + w > window.innerWidth  - 8) x = e.clientX - w - pad;
       if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
       atip.style.left = Math.max(8, x) + 'px';
       atip.style.top  = Math.max(8, y) + 'px';
