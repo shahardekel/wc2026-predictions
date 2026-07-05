@@ -276,9 +276,8 @@
     .fcard:hover{border-color:rgba(99,179,237,.45);transform:translateY(-2px);box-shadow:0 4px 18px rgba(0,0,0,.3);}
     /* tooltip */
     .tip-wrap{position:relative;display:contents;}
-    .tip-box{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid rgba(99,179,237,.4);color:#e2e8f0;font-size:11px;line-height:1.55;padding:10px 13px;border-radius:9px;width:240px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:999;white-space:normal;box-shadow:0 8px 28px rgba(0,0,0,.5);}
-    .tip-box::before{content:'';position:absolute;bottom:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-bottom-color:#1e293b;}
-    .fcard:hover .tip-box,.algo-card:hover .tip-box{opacity:1;}
+    /* .tip-box is used only as data storage for the global #atip tooltip — never rendered */
+    .tip-box{display:none !important;}
 
     /* heatmap */
     .algo-heatmap-controls{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
