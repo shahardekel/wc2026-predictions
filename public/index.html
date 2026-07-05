@@ -271,7 +271,8 @@
     .algo-card-name{font-size:13px;font-weight:700;color:var(--text);margin:6px 0 4px;}
     .algo-card-desc{font-size:11px;color:var(--dim);line-height:1.5;}
     /* factor grid small cards */
-    .fcard{background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px;cursor:default;transition:border-color .15s,transform .15s,box-shadow .15s;position:relative;}
+    .fcard{background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:12px 14px;cursor:default;transition:border-color .15s,transform .15s,box-shadow .15s;position:relative;z-index:1;}
+    .fcard:hover,.algo-card:hover{z-index:10;}
     .fcard:hover{border-color:rgba(99,179,237,.45);transform:translateY(-2px);box-shadow:0 4px 18px rgba(0,0,0,.3);}
     /* tooltip */
     .tip-wrap{position:relative;display:contents;}
@@ -448,6 +449,8 @@
   <div id="gc"><div class="state"><div class="ic">⚽</div><h3>Loading predictions…</h3></div></div>
 </main>
 </div>
+<!-- Global algo tooltip -->
+<div id="atip" style="position:fixed;z-index:9999;background:#1e293b;border:1px solid rgba(99,179,237,.45);color:#e2e8f0;font-size:11px;line-height:1.6;padding:11px 14px;border-radius:10px;width:260px;pointer-events:none;opacity:0;transition:opacity .15s;box-shadow:0 8px 32px rgba(0,0,0,.6);white-space:normal;display:none"></div>
 
 <script>
 let games=[], filter='soon', cdVal=60;
@@ -862,12 +865,31 @@ async function renderAlgo(){
     algoData = await fetch('/api/algo-data').then(r => r.json());
     gc.innerHTML = buildAlgoPage(algoData);
     initAlgoCharts(algoData);
-    // Wire up tooltips via JS (CSS :hover unreliable on dynamically-inserted innerHTML)
+    // Wire up tooltips via global fixed tooltip (avoids overflow/z-index clipping)
+    const atip = document.getElementById('atip');
+    function showATip(e, text) {
+      atip.textContent = text;
+      atip.style.display = 'block';
+      positionATip(e);
+      atip.style.opacity = '1';
+    }
+    function positionATip(e) {
+      const pad = 14, w = 260, h = atip.offsetHeight;
+      let x = e.clientX + pad, y = e.clientY + pad;
+      if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+      if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
+      atip.style.left = Math.max(8, x) + 'px';
+      atip.style.top  = Math.max(8, y) + 'px';
+    }
+    function hideATip() { atip.style.opacity = '0'; setTimeout(() => { atip.style.display = 'none'; }, 150); }
+
     gc.querySelectorAll('.fcard, .algo-card').forEach(card => {
       const tb = card.querySelector('.tip-box');
       if (!tb) return;
-      card.addEventListener('mouseenter', () => { tb.style.opacity = '1'; });
-      card.addEventListener('mouseleave', () => { tb.style.opacity = '0'; });
+      const tipText = tb.textContent.trim();
+      card.addEventListener('mouseenter', e => { showATip(e, tipText); card.style.zIndex = '20'; });
+      card.addEventListener('mousemove',  e => positionATip(e));
+      card.addEventListener('mouseleave', () => { hideATip(); card.style.zIndex = ''; });
     });
   } catch(e) {
     gc.innerHTML = `<div class="state"><div class="ic">❌</div><h3>Failed to load: ${e.message}</h3></div>`;
@@ -916,28 +938,32 @@ function buildAlgoPage(d){
       <p class="algo-sub">Measured against <strong>${acc.n} finished WC 2026 matches</strong>. Updates automatically as games complete.</p>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:16px 0">
-        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+        <div class="fcard" style="background:var(--bg);text-align:center">
+          <div class="tip-box" style="text-align:left">The model predicts one of three outcomes (home win / draw / away win) by picking whichever has the highest probability. ${pct(acc.correct/acc.n)}% of the time the predicted outcome matched the actual result across ${acc.n} finished matches. Random guessing = 33%, so this is ${pct(acc.correct/acc.n - 33/100)} points above baseline.</div>
           <div style="font-size:32px;font-weight:900;color:var(--acc)">${pct(acc.correct/acc.n)}%</div>
           <div style="font-size:11px;color:var(--mut);margin-top:2px">CORRECT OUTCOME</div>
           <div style="font-size:10px;color:var(--dim);margin-top:4px">${acc.correct}/${acc.n} matches</div>
           ${bar(acc.correct, acc.n, 'var(--acc)')}
           <div style="font-size:9px;color:var(--mut);margin-top:4px">Baseline (random): 33%</div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+        <div class="fcard" style="background:var(--bg);text-align:center">
+          <div class="tip-box" style="text-align:left">An exact score prediction means both the home and away goals matched precisely (e.g. predicted 2-1, ended 2-1). ${acc.exact} out of ${acc.n} matches. Industry average for statistical models is ~8%, so this is ${pct(acc.exact/acc.n) >= 8 ? 'at or above' : 'below'} typical. Harder to hit as tournament goals-per-game increases.</div>
           <div style="font-size:32px;font-weight:900;color:var(--grn)">${pct(acc.exact/acc.n)}%</div>
           <div style="font-size:11px;color:var(--mut);margin-top:2px">EXACT SCORE</div>
           <div style="font-size:10px;color:var(--dim);margin-top:4px">${acc.exact}/${acc.n} matches</div>
           ${bar(acc.exact, acc.n, 'var(--grn)')}
           <div style="font-size:9px;color:var(--mut);margin-top:4px">Industry avg: ~8%</div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+        <div class="fcard" style="background:var(--bg);text-align:center">
+          <div class="tip-box" style="text-align:left">Average total goals across all ${acc.n} finished WC 2026 matches is ${acc.avgGoals} goals/game. The model predicted an average of ${acc.avgPredGoals} goals/game — a difference of ${Math.abs(parseFloat(acc.avgGoals) - parseFloat(acc.avgPredGoals)).toFixed(2)} goals. The model uses a Poisson distribution calibrated on WC 2026 + 2022 data.</div>
           <div style="font-size:32px;font-weight:900;color:var(--org)">${acc.avgGoals}</div>
           <div style="font-size:11px;color:var(--mut);margin-top:2px">AVG GOALS / GAME</div>
           <div style="font-size:10px;color:var(--dim);margin-top:4px">Predicted: ${acc.avgPredGoals}</div>
           ${bar(parseFloat(acc.avgGoals), 5, 'var(--org)')}
           <div style="font-size:9px;color:var(--mut);margin-top:4px">WC 2026 actual rate</div>
         </div>
-        <div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+        <div class="fcard" style="background:var(--bg);text-align:center">
+          <div class="tip-box" style="text-align:left">Of the ${acc.dActual} matches that actually ended in a draw, the model correctly predicted ${acc.dCorrect}. Draws are notoriously hard to predict — the Poisson model treats home and away goals independently, systematically underestimating draws. The new draw boost (±6pp for evenly-matched teams) targets this weakness.</div>
           <div style="font-size:32px;font-weight:900;color:${acc.dCorrect===0?'var(--red)':'var(--gld)'}">${acc.dActual>0?pct(acc.dCorrect/acc.dActual):0}%</div>
           <div style="font-size:11px;color:var(--mut);margin-top:2px">DRAW ACCURACY</div>
           <div style="font-size:10px;color:var(--dim);margin-top:4px">${acc.dCorrect}/${acc.dActual} draws</div>
@@ -948,11 +974,12 @@ function buildAlgoPage(d){
 
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:4px">
         ${[
-          ['🏠 Home wins', acc.hCorrect, acc.hActual, acc.hPred, 'var(--grn)'],
-          ['🤝 Draws',     acc.dCorrect, acc.dActual, acc.dPred, 'var(--gld)'],
-          ['✈️ Away wins', acc.aCorrect, acc.aActual, acc.aPred, 'var(--acc)'],
-        ].map(([label, correct, actual, pred, color]) => `
-          <div style="background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+          ['🏠 Home wins', acc.hCorrect, acc.hActual, acc.hPred, 'var(--grn)', 'The model predicted a home win in ' + acc.hPred + ' matches. There were ' + acc.hActual + ' actual home wins, of which ' + acc.hCorrect + ' were correctly predicted. "Home" at WC 2026 means the first-named team in the fixture, not a crowd-backed side.'],
+          ['🤝 Draws',     acc.dCorrect, acc.dActual, acc.dPred, 'var(--gld)', 'The model predicted a draw in ' + acc.dPred + ' matches. There were ' + acc.dActual + ' actual draws — the model caught ' + acc.dCorrect + '. The draw boost introduced for evenly-matched teams (λ ratio > 0.82) is designed to improve this.'],
+          ['✈️ Away wins', acc.aCorrect, acc.aActual, acc.aPred, 'var(--acc)', 'The model predicted an away win in ' + acc.aPred + ' matches. There were ' + acc.aActual + ' actual away wins, of which ' + acc.aCorrect + ' were correctly predicted. Away teams at WC 2026 are not at a crowd disadvantage — neutral venues level the field.'],
+        ].map(([label, correct, actual, pred, color, tip]) => `
+          <div class="fcard" style="background:var(--bg)">
+            <div class="tip-box">${tip}</div>
             <div style="font-size:10px;color:var(--mut);margin-bottom:6px">${label}</div>
             <div style="font-size:18px;font-weight:800;color:${color}">${actual>0?pct(correct/actual):0}%</div>
             <div style="font-size:9px;color:var(--mut);margin-top:3px">${correct}/${actual} correct · predicted ${pred}</div>
