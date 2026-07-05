@@ -862,6 +862,13 @@ async function renderAlgo(){
     algoData = await fetch('/api/algo-data').then(r => r.json());
     gc.innerHTML = buildAlgoPage(algoData);
     initAlgoCharts(algoData);
+    // Wire up tooltips via JS (CSS :hover unreliable on dynamically-inserted innerHTML)
+    gc.querySelectorAll('.fcard, .algo-card').forEach(card => {
+      const tb = card.querySelector('.tip-box');
+      if (!tb) return;
+      card.addEventListener('mouseenter', () => { tb.style.opacity = '1'; });
+      card.addEventListener('mouseleave', () => { tb.style.opacity = '0'; });
+    });
   } catch(e) {
     gc.innerHTML = `<div class="state"><div class="ic">❌</div><h3>Failed to load: ${e.message}</h3></div>`;
   }
