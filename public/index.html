@@ -960,7 +960,7 @@ function buildAlgoPage(d){
     <!-- ── OVERVIEW ── -->
     <div class="algo-section">
       <h2 class="algo-h2">How the prediction engine works</h2>
-      <p class="algo-sub">A three-component probabilistic model trained on <strong>${d.wc2026Count}</strong> WC 2026 matches (live-updated) and <strong>${d.wc2022Count}</strong> WC 2022 historical matches. It produces a full score probability distribution, not just a single number.</p>
+      <p class="algo-sub">A three-component probabilistic model trained on <strong>${d.wc2026Count}</strong> WC 2026 matches (live-updated), <strong>${d.wc2022Count}</strong> WC 2022 historical matches, and <strong>36 WC 2026 qualifying matches</strong> (0.10× prior). It produces a full score probability distribution, not just a single number.</p>
       <div class="algo-cards">
         <div class="algo-card" style="border-color:var(--grn)">
           <div class="algo-card-pct" style="color:var(--grn)">55%</div>
@@ -970,7 +970,7 @@ function buildAlgoPage(d){
         <div class="algo-card" style="border-color:var(--org)">
           <div class="algo-card-pct" style="color:var(--org)">40%</div>
           <div class="algo-card-name">Market Odds</div>
-          <div class="algo-card-desc">Bookmaker consensus probabilities (de-vigged) from 40+ bookmakers. The "wisdom of crowds" — markets aggregate massive information efficiently.</div>
+          <div class="algo-card-desc">Bookmaker consensus probabilities (de-vigged) from 40+ bookmakers. The "wisdom of crowds" — markets aggregate massive information efficiently. O/U blend weight is 25% for generic lines (e.g. 2.5) and 40% for match-specific lines.</div>
         </div>
         <div class="algo-card" style="border-color:var(--pur)">
           <div class="algo-card-pct" style="color:var(--pur)">5%</div>
@@ -1053,7 +1053,7 @@ function buildAlgoPage(d){
           <div class="algo-math-title">Bayesian team strength update</div>
           <div class="algo-eq">atk = w·x̄<sub>obs</sub> + (1−w)·atk<sub>prior</sub></div>
           <div class="algo-eq-note">w = 1 − 1/(1 + n×0.5) &nbsp;·&nbsp; n = effective games played</div>
-          <div class="algo-eq-note">WC 2026 games: weight 1.0 &nbsp;·&nbsp; WC 2022: weight 0.25</div>
+          <div class="algo-eq-note">WC 2026 games: weight 1.0 &nbsp;·&nbsp; WC 2022: weight 0.25 &nbsp;·&nbsp; Qualifiers: weight 0.10</div>
         </div>
         <div class="algo-math-block">
           <div class="algo-math-title">Elo update rule (K=32)</div>
@@ -1081,6 +1081,7 @@ function buildAlgoPage(d){
           <div class="algo-eq-small">last 3 games: recencyScale × <span style="color:var(--grn)">2.0</span></div>
           <div class="algo-eq-small">older games: recencyScale × <span style="color:var(--mut)">1.0</span></div>
           <div class="algo-eq-small">WC 2022 history: × <span style="color:var(--mut)">0.25</span></div>
+          <div class="algo-eq-small">WC 2026 qualifiers: × <span style="color:var(--mut)">0.10</span></div>
           <div class="algo-eq-note">+ position decay: w = DECAY<sup>idx</sup> (DECAY=0.62)</div>
         </div>
       </div>
