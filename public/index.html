@@ -627,8 +627,8 @@ function card(g){
     if(p&&p.predictedHome!=null){
       const ph=p.predictedHome,pa=p.predictedAway;
       const actOut=hs>as_?'H':hs<as_?'A':'D';
-      const maxP=(hw,d,aw)=>hw>=d&&hw>=aw?'H':aw>=d&&aw>=hw?'A':'D';
-      const predOut=maxP(p.homeWinProb||0,p.drawProb||0,p.awayWinProb||0);
+      // Use the predicted score (not probabilities) so the verdict matches what's displayed
+      const predOut=ph>pa?'H':ph<pa?'A':'D';
       const rightScore=ph===hs&&pa===as_;
       const rightOutcome=actOut===predOut;
       const phc=ph>pa?'w':ph<pa?'l':'d', pac=pa>ph?'w':pa<ph?'l':'d';
