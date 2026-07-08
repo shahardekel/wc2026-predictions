@@ -622,7 +622,25 @@ function card(g){
   } else if(isFin&&g.homeScore!=null){
     const hs=g.homeScore,as_=g.awayScore;
     const hc=hs>as_?'w':hs<as_?'l':'d', ac=as_>hs?'w':as_<hs?'l':'d';
-    center=`<div class="fin-s"><div class="fs"><span class="fsn ${hc}">${hs}</span><span class="fsd">–</span><span class="fsn ${ac}">${as_}</span></div><div class="fin-tag">✓ FINAL</div></div>`;
+    // prediction result badge
+    let predBadge='';
+    if(p&&p.predictedHome!=null){
+      const ph=p.predictedHome,pa=p.predictedAway;
+      const actOut=hs>as_?'H':hs<as_?'A':'D';
+      const maxP=(hw,d,aw)=>hw>=d&&hw>=aw?'H':aw>=d&&aw>=hw?'A':'D';
+      const predOut=maxP(p.homeWinProb||0,p.drawProb||0,p.awayWinProb||0);
+      const rightScore=ph===hs&&pa===as_;
+      const rightOutcome=actOut===predOut;
+      const phc=ph>pa?'w':ph<pa?'l':'d', pac=pa>ph?'w':pa<ph?'l':'d';
+      const scoreColor=rightScore?'var(--grn)':rightOutcome?'var(--gld)':'var(--red)';
+      const scoreLabel=rightScore?'✓ Exact score':rightOutcome?'✓ Right outcome':'✗ Wrong';
+      predBadge=`<div style="margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:9px;color:var(--mut)">🤖 predicted</span>
+        <span style="font-size:12px;font-weight:700;color:var(--dim)"><span style="${rightScore?'color:var(--grn)':''}">${ph}</span><span style="color:var(--mut);margin:0 2px">–</span><span style="${rightScore?'color:var(--grn)':''}">${pa}</span></span>
+        <span style="font-size:9px;font-weight:700;padding:1px 7px;border-radius:6px;background:${scoreColor}22;color:${scoreColor};border:1px solid ${scoreColor}44">${scoreLabel}</span>
+      </div>`;
+    }
+    center=`<div class="fin-s"><div class="fs"><span class="fsn ${hc}">${hs}</span><span class="fsd">–</span><span class="fsn ${ac}">${as_}</span></div><div class="fin-tag">✓ FINAL</div>${predBadge}</div>`;
   } else if(p){
     const ph=p.predictedHome,pa=p.predictedAway;
     const hc=ph>pa?'w':ph<pa?'l':'d', ac=pa>ph?'w':pa<ph?'l':'d';
