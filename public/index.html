@@ -450,7 +450,7 @@
 </div>
 
 <script>
-let games=[], filter='soon', cdVal=60;
+let games=[], filter='soon', cdVal=60, predFilter='all';
 
 function openSidebar(){document.getElementById('sidebar').classList.add('open');document.getElementById('sb-overlay').classList.add('open');document.body.style.overflow='hidden';}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('open');document.body.style.overflow='';}
@@ -595,11 +595,38 @@ function render(){
   if(!f.length){gc.innerHTML=`<div class="state"><div class="ic">📅</div><h3>No ${filter} games</h3></div>`;return;}
   const grp={live:[],soon:[],upcoming:[],finished:[]};
   f.forEach(g=>(grp[g.status]||grp.upcoming).push(g));
+
+  // Prediction sub-filter (only for finished tab)
+  function getPredVerdict(g){
+    const p=g.prediction; if(!p||g.homeScore==null) return null;
+    const hs=g.homeScore,as_=g.awayScore,ph=p.predictedHome,pa=p.predictedAway;
+    if(ph==null) return null;
+    if(ph===hs&&pa===as_) return 'exact';
+    const actOut=hs>as_?'H':hs<as_?'A':'D', predOut=ph>pa?'H':ph<pa?'A':'D';
+    return actOut===predOut?'right':'wrong';
+  }
+  let finGames=grp.finished;
+  if(filter==='finished'&&predFilter!=='all') finGames=finGames.filter(g=>getPredVerdict(g)===predFilter);
+
   let html='';
+  // Sub-filter bar for finished tab
+  if(filter==='finished'){
+    const counts={all:grp.finished.length, exact:0, right:0, wrong:0};
+    grp.finished.forEach(g=>{const v=getPredVerdict(g);if(v)counts[v]++;});
+    const pf=(val,label)=>`<button onclick="predFilter='${val}';render()" style="padding:3px 12px;font-size:10px;border-radius:20px;border:1px solid ${predFilter===val?'var(--acc)':'var(--bor)'};background:${predFilter===val?'rgba(59,130,246,.15)':'var(--sur2)'};color:${predFilter===val?'var(--acc)':'var(--mut)'};cursor:pointer;transition:all .15s">${label} <span style="opacity:.7">${counts[val]}</span></button>`;
+    html+=`<div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 0 4px">
+      ${pf('all','All')}
+      ${pf('exact','✓ Exact score')}
+      ${pf('right','✓ Right outcome')}
+      ${pf('wrong','✗ Wrong')}
+    </div>`;
+  }
+
   if(grp.live.length){html+=`<div class="sh">🔴 Live Now</div>`;grp.live.forEach(g=>html+=card(g));}
   if(grp.soon.length){html+=`<div class="sh">⚡ Starting Soon</div>`;grp.soon.forEach(g=>html+=card(g));}
   if(grp.upcoming.length){html+=`<div class="sh">📅 Upcoming — AI Predictions</div>`;grp.upcoming.forEach(g=>html+=card(g));}
-  if(grp.finished.length){html+=`<div class="sh">✓ Finished</div>`;grp.finished.forEach(g=>html+=card(g));}
+  if(finGames.length){html+=`<div class="sh">✓ Finished</div>`;finGames.forEach(g=>html+=card(g));}
+  else if(filter==='finished')html+=`<div class="state"><div class="ic">🔍</div><h3>No matches for this filter</h3></div>`;
   gc.innerHTML=html;
 }
 
@@ -856,6 +883,7 @@ function showTabLoader(cb){
 }
 
 function setF(f,el){
+  if(f!=='finished') predFilter='all';
   filter=f;
   document.querySelectorAll('.fb').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
