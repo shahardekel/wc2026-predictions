@@ -464,7 +464,7 @@ async function getESPN() {
   const today = new Date();
   // Fetch all dates in PARALLEL — much faster than sequential
   const dates = [];
-  for (let d = -14; d <= 14; d++) {
+  for (let d = -60; d <= 7; d++) {
     dates.push(new Date(today.getTime() + d*86400000).toISOString().slice(0,10).replace(/-/g,""));
   }
 

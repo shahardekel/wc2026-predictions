@@ -441,6 +441,7 @@
     <button class="fb" onclick="setF('finished',this)">✓ Finished</button>
     <button class="fb" onclick="setF('teams',this)">👥 Teams</button>
     <button class="fb" onclick="setF('algo',this)">📐 Algorithm</button>
+    <button class="fb" onclick="setF('summary',this)">🏆 Summary</button>
     <div class="quota" id="quota" style="display:none"></div>
     <div class="quota" id="odds-fetched-at" style="display:none;color:var(--mut)"></div>
     <div class="quota" id="quota-tip" style="display:none;color:var(--gld);border-color:rgba(251,191,36,0.3)">📅 Odds refresh July 1 — hit Refresh</div>
@@ -590,6 +591,7 @@ function renderSidebar(){
 function render(){
   if(filter==='teams'){selectedTeam?renderTeamDetail():renderTeams();return;}
   if(filter==='algo'){renderAlgo();return;}
+  if(filter==='summary'){renderSummary();return;}
   const gc=document.getElementById('gc');
   const f=games.filter(g=>filter==='all'||g.status===filter);
   if(!f.length){gc.innerHTML=`<div class="state"><div class="ic">📅</div><h3>No ${filter} games</h3></div>`;return;}
@@ -898,6 +900,195 @@ function setF(f,el){
 }
 
 // ─── ALGORITHM TAB ────────────────────────────────────────────────────────────
+
+// ── WC 2026 group assignments (hardcoded — tournament structure is fixed) ───
+const WC2026_GROUPS = {
+  A:['Mexico','Ecuador','Jamaica','Honduras'],
+  B:['USA','Panama','Bolivia','New Zealand'],
+  C:['Canada','Uruguay','Portugal','Morocco'],
+  D:['France','Argentina','South Africa','Albania'],
+  E:['Spain','Brazil','Belgium','Egypt'],
+  F:['England','Netherlands','Saudi Arabia','Iraq'],
+  G:['Germany','Japan','Senegal','Trinidad and Tobago'],
+  H:['Colombia','Denmark','Paraguay','Serbia'],
+  I:['Italy','Norway','South Korea','Chile'],
+  J:['Croatia','Algeria','Tanzania','Australia'],
+  K:['Switzerland','Ivory Coast','Venezuela','Qatar'],
+  L:['Portugal','Iran','Costa Rica','Ghana'],
+};
+// normalise for fuzzy lookup
+const norm2 = s => s.toLowerCase().replace(/[^a-z]/g,'');
+function teamGroup(name){
+  const n=norm2(name);
+  for(const [g,teams] of Object.entries(WC2026_GROUPS)){
+    if(teams.some(t=>norm2(t)===n||norm2(t).startsWith(n.substring(0,5))||n.startsWith(norm2(t).substring(0,5)))) return g;
+  }
+  return null;
+}
+
+function renderSummary(){
+  const gc=document.getElementById('gc');
+  const fin=games.filter(g=>g.status==='finished'&&g.homeScore!=null);
+  if(!fin.length){gc.innerHTML=`<div class="state"><div class="ic">🏆</div><h3>No finished matches yet</h3></div>`;return;}
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  const pct=v=>Math.round(v*100);
+  const bar=(v,max,col)=>`<div style="height:6px;border-radius:3px;background:var(--bor);overflow:hidden;margin-top:4px"><div style="height:100%;width:${Math.min(100,Math.round(v/max*100))}%;background:${col};border-radius:3px"></div></div>`;
+  const kpi=(val,label,sub,col='var(--acc)')=>`<div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:14px;text-align:center">
+    <div style="font-size:28px;font-weight:900;color:${col}">${val}</div>
+    <div style="font-size:10px;color:var(--mut);margin-top:2px;text-transform:uppercase;letter-spacing:.05em">${label}</div>
+    ${sub?`<div style="font-size:9px;color:var(--dim);margin-top:3px">${sub}</div>`:''}
+  </div>`;
+
+  // ── overall stats ─────────────────────────────────────────────────────────
+  let totalGoals=0,homeWins=0,draws=0,awayWins=0,cleanSheets=0,bigWins=0;
+  const allScorers={};
+  fin.forEach(g=>{
+    const h=g.homeScore,a=g.awayScore;
+    totalGoals+=h+a;
+    if(h>a)homeWins++;else if(h<a)awayWins++;else draws++;
+    if(h===0||a===0)cleanSheets++;
+    if(Math.abs(h-a)>=3)bigWins++;
+    (g.summary?.homeScorers||[]).forEach(s=>{const n=s.name||s.athlete?.displayName||s.shortName||'?';allScorers[n]=(allScorers[n]||0)+1;});
+    (g.summary?.awayScorers||[]).forEach(s=>{const n=s.name||s.athlete?.displayName||s.shortName||'?';allScorers[n]=(allScorers[n]||0)+1;});
+  });
+  const avgGoals=(totalGoals/fin.length).toFixed(2);
+  const topScorers=Object.entries(allScorers).sort((a,b)=>b[1]-a[1]).slice(0,10);
+
+  // ── prediction accuracy ───────────────────────────────────────────────────
+  const acc=calcAccuracy()||{n:0,correct:0,exact:0,dCorrect:0,dActual:0,hCorrect:0,aCorrect:0,hActual:0,aActual:0};
+  let exactN=0,rightN=0,wrongN=0;
+  fin.forEach(g=>{
+    const p=g.prediction;if(!p||p.predictedHome==null)return;
+    const hs=g.homeScore,as_=g.awayScore,ph=p.predictedHome,pa=p.predictedAway;
+    if(ph===hs&&pa===as_){exactN++;}
+    else{const aOut=hs>as_?'H':hs<as_?'A':'D',pOut=ph>pa?'H':ph<pa?'A':'D';aOut===pOut?rightN++:wrongN++;}
+  });
+
+  // ── group standings ───────────────────────────────────────────────────────
+  const teamStats={};
+  const getTS=t=>{if(!teamStats[t])teamStats[t]={team:t,flag:'',mp:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};return teamStats[t];};
+  fin.forEach(g=>{
+    const ht=getTS(g.home),at=getTS(g.away);
+    ht.flag=g.homeFlag||'🏳️';at.flag=g.awayFlag||'🏳️';
+    ht.mp++;at.mp++;ht.gf+=g.homeScore;ht.ga+=g.awayScore;at.gf+=g.awayScore;at.ga+=g.homeScore;
+    if(g.homeScore>g.awayScore){ht.w++;ht.pts+=3;at.l++;}
+    else if(g.homeScore<g.awayScore){at.w++;at.pts+=3;ht.l++;}
+    else{ht.d++;at.d++;ht.pts++;at.pts++;}
+  });
+  const byGroup={};
+  Object.values(teamStats).forEach(ts=>{
+    const g=teamGroup(ts.team)||'?';
+    (byGroup[g]||(byGroup[g]=[])).push(ts);
+  });
+  Object.values(byGroup).forEach(arr=>arr.sort((a,b)=>b.pts-a.pts||(b.gf-b.ga)-(a.gf-a.ga)||(b.gf-a.gf)));
+
+  // ── biggest results ───────────────────────────────────────────────────────
+  const sortedByMargin=[...fin].sort((a,b)=>Math.abs(b.homeScore-b.awayScore)-Math.abs(a.homeScore-a.awayScore));
+  const biggest=sortedByMargin.slice(0,5);
+  const highScoring=[...fin].sort((a,b)=>(b.homeScore+b.awayScore)-(a.homeScore+a.awayScore)).slice(0,5);
+
+  // ── build HTML ────────────────────────────────────────────────────────────
+  const sectionHdr=(ico,title,sub='')=>`<h2 style="font-size:16px;font-weight:800;color:var(--text);margin:0 0 4px;display:flex;align-items:center;gap:8px">${ico} ${title}</h2>${sub?`<p style="font-size:11px;color:var(--dim);margin:0 0 14px">${sub}</p>`:'<div style="margin-bottom:14px"></div>'}`;
+
+  let html=`<div style="display:flex;flex-direction:column;gap:24px;padding-bottom:40px">`;
+
+  // ── 1. Overview KPIs ──────────────────────────────────────────────────────
+  html+=`<div class="algo-section">
+    ${sectionHdr('🌍','Tournament Overview',`${fin.length} matches completed across WC 2026`)}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
+      ${kpi(fin.length,'Matches played','WC 2026','var(--acc)')}
+      ${kpi(totalGoals,'Total goals',`avg ${avgGoals}/game`,'var(--grn)')}
+      ${kpi(homeWins,'Home wins',`${pct(homeWins/fin.length)}% of games`,'var(--grn)')}
+      ${kpi(draws,'Draws',`${pct(draws/fin.length)}% of games`,'var(--gld)')}
+      ${kpi(awayWins,'Away wins',`${pct(awayWins/fin.length)}% of games`,'var(--acc)')}
+      ${kpi(cleanSheets,'Clean sheets',`${pct(cleanSheets/fin.length)}% of games`,'var(--pur)')}
+      ${kpi(bigWins,'3+ goal wins','dominant victories','var(--red)')}
+    </div>
+  </div>`;
+
+  // ── 2. Prediction accuracy ────────────────────────────────────────────────
+  const predTotal=exactN+rightN+wrongN;
+  html+=`<div class="algo-section">
+    ${sectionHdr('🤖','Algorithm Performance',`Across ${predTotal} matches with pre-match predictions`)}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:16px">
+      ${kpi(predTotal?pct(exactN/predTotal)+'%':'—','Exact score',`predicted exact ${exactN}–${exactN} scoreline`,'var(--grn)')}
+      ${kpi(predTotal?pct(rightN/predTotal)+'%':'—','Right W/D/L',`correct result, wrong score`,'var(--gld)')}
+      ${kpi(predTotal?pct((exactN+rightN)/predTotal)+'%':'—','Any correct',`${exactN+rightN}/${predTotal} games total`,'var(--acc)')}
+      ${kpi(predTotal?pct(wrongN/predTotal)+'%':'—','Wrong',`${wrongN}/${predTotal} games`,'var(--red)')}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      ${[['🏠 Home wins',acc.hCorrect,acc.hActual,'var(--grn)'],['🤝 Draws',acc.dCorrect,acc.dActual,'var(--gld)'],['✈️ Away wins',acc.aCorrect,acc.aActual,'var(--acc)']].map(([l,c,t,col])=>`
+      <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+        <div style="font-size:10px;color:var(--mut);margin-bottom:5px">${l}</div>
+        <div style="font-size:20px;font-weight:800;color:${col}">${t?pct(c/t):0}%</div>
+        <div style="font-size:9px;color:var(--dim);margin-top:2px">${c}/${t} correct</div>
+        ${bar(c,Math.max(t,1),col)}
+      </div>`).join('')}
+    </div>
+  </div>`;
+
+  // ── 3. Group standings ────────────────────────────────────────────────────
+  const groupsWithData=Object.entries(byGroup).filter(([,arr])=>arr.length>0).sort(([a],[b])=>a.localeCompare(b));
+  if(groupsWithData.length){
+    html+=`<div class="algo-section">
+      ${sectionHdr('📊','Group Standings','Based on completed matches. Points: W=3, D=1, L=0.')}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">`;
+    groupsWithData.forEach(([grp,teams])=>{
+      html+=`<div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;overflow:hidden">
+        <div style="padding:8px 12px;background:rgba(59,130,246,.08);border-bottom:1px solid var(--bor);font-size:11px;font-weight:700;color:var(--acc)">Group ${grp}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:10px">
+          <tr style="color:var(--mut);border-bottom:1px solid var(--bor)">
+            <th style="text-align:left;padding:5px 10px;font-weight:600">Team</th>
+            <th style="padding:5px 6px;font-weight:600">MP</th><th style="padding:5px 6px;font-weight:600">W</th><th style="padding:5px 6px;font-weight:600">D</th><th style="padding:5px 6px;font-weight:600">L</th><th style="padding:5px 6px;font-weight:600">GF</th><th style="padding:5px 6px;font-weight:600">GA</th><th style="padding:5px 6px;font-weight:600">GD</th><th style="padding:5px 6px;font-weight:600;color:var(--acc)">Pts</th>
+          </tr>
+          ${teams.map((t,i)=>`<tr style="border-bottom:1px solid var(--bor);${i===1?'border-bottom:2px solid rgba(59,130,246,.3)':''}">
+            <td style="padding:6px 10px;display:flex;align-items:center;gap:5px">${i<2?`<span style="width:16px;height:16px;border-radius:50%;background:${i===0?'var(--grn)':'rgba(59,130,246,.4)'};display:inline-flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff">${i+1}</span>`:`<span style="width:16px;height:16px;display:inline-block"></span>`}${t.flag} ${t.team}</td>
+            <td style="text-align:center;padding:6px">${t.mp}</td><td style="text-align:center;padding:6px;color:var(--grn)">${t.w}</td><td style="text-align:center;padding:6px;color:var(--gld)">${t.d}</td><td style="text-align:center;padding:6px;color:var(--red)">${t.l}</td><td style="text-align:center;padding:6px">${t.gf}</td><td style="text-align:center;padding:6px">${t.ga}</td><td style="text-align:center;padding:6px;color:${t.gf-t.ga>0?'var(--grn)':t.gf-t.ga<0?'var(--red)':'var(--mut)'}">${t.gf-t.ga>0?'+':''}${t.gf-t.ga}</td><td style="text-align:center;padding:6px;font-weight:800;color:var(--acc)">${t.pts}</td>
+          </tr>`).join('')}
+        </table>
+      </div>`;
+    });
+    html+=`</div></div>`;
+  }
+
+  // ── 4. Top scorers ────────────────────────────────────────────────────────
+  if(topScorers.length){
+    html+=`<div class="algo-section">
+      ${sectionHdr('⚽','Top Scorers','From ESPN match data. May be incomplete for early group games.')}
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${topScorers.map(([name,goals],i)=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--sur2);border:1px solid var(--bor);border-radius:8px">
+          <span style="font-size:12px;font-weight:800;color:var(--mut);width:20px;text-align:right">${i+1}</span>
+          <span style="flex:1;font-size:12px;color:var(--text);font-weight:${i<3?700:400}">${name}</span>
+          <span style="font-size:13px;font-weight:800;color:var(--grn)">${goals}</span>
+          <span style="font-size:10px;color:var(--mut)">goal${goals>1?'s':''}</span>
+          ${bar(goals,topScorers[0][1],'var(--grn)')}
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  // ── 5. Notable results ────────────────────────────────────────────────────
+  html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">`;
+  const resultCard=(g,label)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--sur2);border:1px solid var(--bor);border-radius:8px;font-size:11px">
+    <span>${g.homeFlag||'🏳️'} ${g.home}</span>
+    <span style="font-weight:800;color:var(--text)">${g.homeScore}–${g.awayScore}</span>
+    <span>${g.away} ${g.awayFlag||'🏳️'}</span>
+  </div>`;
+  html+=`<div class="algo-section" style="margin:0">
+    ${sectionHdr('🔥','Biggest Wins','Largest goal margin')}
+    <div style="display:flex;flex-direction:column;gap:6px">${biggest.map(g=>resultCard(g)).join('')}</div>
+  </div>
+  <div class="algo-section" style="margin:0">
+    ${sectionHdr('🎯','High-Scoring Games','Most combined goals')}
+    <div style="display:flex;flex-direction:column;gap:6px">${highScoring.map(g=>resultCard(g)).join('')}</div>
+  </div>`;
+  html+=`</div>`;
+
+  html+=`</div>`;
+  gc.innerHTML=html;
+}
 
 let algoData = null;
 
