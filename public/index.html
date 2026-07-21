@@ -1011,11 +1011,19 @@ function renderSummary(){
   const predTotal=exactN+rightN+wrongN;
   html+=`<div class="algo-section">
     ${sectionHdr('🤖','Algorithm Performance',`Across ${predTotal} matches with pre-match predictions`)}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:16px">
-      ${kpi(predTotal?pct(exactN/predTotal)+'%':'—','Exact score',`predicted exact ${exactN}–${exactN} scoreline`,'var(--grn)')}
-      ${kpi(predTotal?pct(rightN/predTotal)+'%':'—','Right W/D/L',`correct result, wrong score`,'var(--gld)')}
-      ${kpi(predTotal?pct((exactN+rightN)/predTotal)+'%':'—','Any correct',`${exactN+rightN}/${predTotal} games total`,'var(--acc)')}
-      ${kpi(predTotal?pct(wrongN/predTotal)+'%':'—','Wrong',`${wrongN}/${predTotal} games`,'var(--red)')}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px">
+      ${[
+        [predTotal?pct(exactN/predTotal)+'%':'—','🎯 Exact Score',`${exactN}/${predTotal} games`,'var(--grn)','Predicted the precise final scoreline (e.g. 2–1). Industry average is ~8–10%. Hardest metric to hit.'],
+        [predTotal?pct(rightN/predTotal)+'%':'—','✅ Right W/D/L',`${rightN}/${predTotal} games`,'var(--gld)','Got the correct result (win/draw/loss) but not the exact score. The most useful real-world signal.'],
+        [predTotal?pct((exactN+rightN)/predTotal)+'%':'—','🏆 Any Correct',`${exactN+rightN}/${predTotal} games`,'var(--acc)','Combined: either exact score or correct outcome. Baseline random chance is ~33%.'],
+        [predTotal?pct(wrongN/predTotal)+'%':'—','❌ Wrong',`${wrongN}/${predTotal} games`,'var(--red)','Predicted the wrong result entirely — e.g. a home win when the away team won or it ended in a draw.'],
+      ].map(([val,label,count,col,desc])=>`
+      <div style="background:var(--sur2);border:1px solid var(--bor);border-radius:10px;padding:16px">
+        <div style="font-size:26px;font-weight:900;color:${col}">${val}</div>
+        <div style="font-size:11px;font-weight:700;color:var(--text);margin-top:4px">${label}</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:2px">${count}</div>
+        <div style="font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5;border-top:1px solid var(--bor);padding-top:8px">${desc}</div>
+      </div>`).join('')}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
       ${[['🏠 Home wins',acc.hCorrect,acc.hActual,'var(--grn)'],['🤝 Draws',acc.dCorrect,acc.dActual,'var(--gld)'],['✈️ Away wins',acc.aCorrect,acc.aActual,'var(--acc)']].map(([l,c,t,col])=>`
